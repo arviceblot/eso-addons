@@ -1,0 +1,2 @@
+cargo:rustc-env=TYPENUM_BUILD_CONSTS=/Users/lsales/git/eso-addons/core/target/rls/debug/build/typenum-a4edc1202bf87088/out/consts.rs
+cargo:rustc-env=TYPENUM_BUILD_OP=/Users/lsales/git/eso-addons/core/target/rls/debug/build/typenum-a4edc1202bf87088/out/op.rs

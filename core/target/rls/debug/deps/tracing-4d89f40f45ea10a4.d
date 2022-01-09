@@ -1,0 +1,13 @@
+/Users/lsales/git/eso-addons/core/target/rls/debug/deps/tracing-4d89f40f45ea10a4.rmeta: /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/lib.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/macros.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/dispatcher.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/field.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/instrument.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/level_filters.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/span.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/stdlib.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/subscriber.rs
+
+/Users/lsales/git/eso-addons/core/target/rls/debug/deps/tracing-4d89f40f45ea10a4.d: /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/lib.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/macros.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/dispatcher.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/field.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/instrument.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/level_filters.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/span.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/stdlib.rs /Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/subscriber.rs
+
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/lib.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/macros.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/dispatcher.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/field.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/instrument.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/level_filters.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/span.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/stdlib.rs:
+/Users/lsales/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.37/src/subscriber.rs:
