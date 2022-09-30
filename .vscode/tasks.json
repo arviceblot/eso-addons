@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cargo",
+			"command": "install",
+			"args": [
+				"--path",
+				"${workspaceFolder}"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"label": "rust: cargo install"
+		}
+	]
+}
