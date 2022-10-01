@@ -2,7 +2,7 @@ use std::path::Path;
 
 use colored::*;
 
-use eso_addons::{
+use eso_addons_core::{
     addons::Manager,
     config::{self, Config},
 };

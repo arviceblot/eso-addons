@@ -38,3 +38,5 @@ Cargo.lock
 
 # Ignore code-workspaces
 *.code-workspace
+
+.env

@@ -1,5 +1,6 @@
 use colored::*;
-use eso_addons::{addons::Manager, config::Config};
+use eso_addons_api::ApiClient;
+use eso_addons_core::{addons::Manager, config::Config};
 
 use super::errors::*;
 
@@ -7,7 +8,19 @@ use super::errors::*;
 pub struct UpdateCommand {}
 
 impl UpdateCommand {
-    pub fn run(&self, config: &Config, addon_manager: &Manager) -> Result<()> {
+    pub async fn run(
+        &self,
+        config: &Config,
+        addon_manager: &Manager,
+        client: &mut ApiClient,
+    ) -> Result<()> {
+        // update endpoints from api
+        client
+            .update_endpoints()
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        // write to app data
+
         let desired_addons = &config.addons;
 
         for addon in desired_addons.iter() {
@@ -38,7 +51,7 @@ impl UpdateCommand {
 
         let installed_addons_list = addon_manager.get_addons()?;
         let missing_addons: Vec<String> =
-            eso_addons::get_missing_dependencies(&installed_addons_list.addons).collect();
+            eso_addons_core::get_missing_dependencies(&installed_addons_list.addons).collect();
 
         if missing_addons.len() > 0 {
             println!(
@@ -46,13 +59,14 @@ impl UpdateCommand {
                 "⚠".red()
             );
 
-            for missing in eso_addons::get_missing_dependencies(&installed_addons_list.addons) {
+            for missing in eso_addons_core::get_missing_dependencies(&installed_addons_list.addons)
+            {
                 println!("- {}", missing);
             }
         }
 
         let unused_addons =
-            eso_addons::get_unused_dependencies(&installed_addons_list.addons, desired_addons);
+            eso_addons_core::get_unused_dependencies(&installed_addons_list.addons, desired_addons);
 
         if unused_addons.len() > 0 {
             println!("\nThere are unused dependencies:");

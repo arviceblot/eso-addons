@@ -78,6 +78,26 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}"
-        }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'eso-addons' update",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=eso-addons",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "eso-addons",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "update"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
     ]
 }

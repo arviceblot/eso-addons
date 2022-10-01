@@ -1,7 +1,15 @@
+#[macro_use]
+extern crate clap;
+extern crate dirs;
+#[macro_use]
+extern crate prettytable;
+
 use clap::Parser;
-use dirs;
-use eso_addons::addons;
-use eso_addons::config;
+use eso_addons_api::ApiClient;
+use eso_addons_core::addons;
+use eso_addons_core::config;
+use eso_addons_core::config::{EAM_CONF, EAM_DATA_DIR, EAM_DB};
+use migration::{Migrator, MigratorTrait};
 use std::path::PathBuf;
 
 mod add;
@@ -40,12 +48,12 @@ enum SubCommand {
     Remove(remove::RemoveCommand),
 }
 
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     let opts: Opts = Opts::parse();
 
-    let home_dir = dirs::home_dir().unwrap();
+    let config_dir = dirs::config_dir().unwrap();
 
-    let default_config_filepath = home_dir.join(".eso-addons.toml");
+    let default_config_filepath = config_dir.join(EAM_DATA_DIR).join(EAM_CONF);
     let config_filepath = opts
         .config
         .map(|x| PathBuf::from(&x))
@@ -55,9 +63,18 @@ pub fn run() -> Result<()> {
 
     let addon_manager = addons::Manager::new(&config.addon_dir);
 
+    let mut client = ApiClient::new("https://api.mmoui.com/v3");
+
+    let database_url = format!(
+        "sqlite://{}",
+        config_dir.join(EAM_DATA_DIR).join(EAM_DB).to_string_lossy()
+    );
+    // let connection = sea_orm::Database::connect(&database_url).await?;
+    // Migrator::up(&connection, None).await?;
+
     match opts.subcmd {
         SubCommand::List(list) => list.run(&addon_manager, &config),
-        SubCommand::Update(update) => update.run(&config, &addon_manager),
+        SubCommand::Update(update) => update.run(&config, &addon_manager, &mut client).await,
         SubCommand::Clean(mut clean) => clean
             .run(&config, &addon_manager)
             .map_err(|err| Error::Other(err)),
