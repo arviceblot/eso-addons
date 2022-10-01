@@ -4,6 +4,10 @@ use serde_derive::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const EAM_DATA_DIR: &str = "eso-addons";
+pub const EAM_CONF: &str = "config.json";
+pub const EAM_DB: &str = "addons.db";
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct AddonEntry {
     pub name: String,

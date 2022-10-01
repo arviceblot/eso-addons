@@ -1,5 +1,5 @@
 use clap::Parser;
-use eso_addons::{
+use eso_addons_core::{
     addons,
     addons::Manager,
     config::{self, AddonEntry, Config},

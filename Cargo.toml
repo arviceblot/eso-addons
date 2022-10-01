@@ -5,12 +5,13 @@ authors = ["Damian Czaja <trojan295@protonmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [".", "api", "cli", "entity", "migration"]
 
 [[bin]]
 name = "eso-addons"
 path = "src/main.rs"
 
-[lib]
 
 [dependencies]
 toml = "0.5"
@@ -19,7 +20,7 @@ serde_derive = "1.0"
 clap = { version = "3.2.2", features = ["derive", "cargo"] }
 dirs = "4.0"
 regex = "1"
-reqwest = { version = "0.11", features = ["blocking"] }
+reqwest = { version = "0.11", features = ["blocking", "gzip", "json"] }
 openssl = { version = "0.10", features = ["vendored"] }
 zip = "0.6"
 scraper = "0.13.0"
@@ -28,3 +29,7 @@ requestty = "0.3"
 colored = "2"
 prettytable-rs = "^0.9"
 walkdir = "2"
+sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros" ] }
+tokio = { version = "1", features = ["full"] }
+eso-addons-cli = { path = "cli"}
+eso-addons-core = { path = "core"}

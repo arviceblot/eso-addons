@@ -1,13 +1,8 @@
-#[macro_use]
-extern crate clap;
-extern crate dirs;
-#[macro_use]
-extern crate prettytable;
+use eso_addons_cli::run;
 
-mod cli;
-
-fn main() {
-    match cli::run() {
+#[tokio::main]
+async fn main() {
+    match run().await {
         Err(err) => println!("{}", err),
         Ok(()) => {}
     }
