@@ -3,7 +3,7 @@ use crate::htmlparser;
 
 use regex::Regex;
 use std::fs::{self, File};
-use std::io::{self, BufRead};
+use std::io::{self, copy, BufRead};
 use std::path::{Path, PathBuf};
 use tempfile::tempfile;
 use walkdir::WalkDir;
@@ -132,20 +132,16 @@ impl Manager {
         Ok(())
     }
 
-    pub fn download_addon(&self, url: &str) -> Result<Addon> {
-        let download_link = htmlparser::get_document(url).map(htmlparser::get_cdn_download_link)?;
-        let download_link = download_link.ok_or(Error::CannotDownloadAddon(
-            url.to_owned(),
-            "CDN link missing".into(),
-        ))?;
-
-        let mut response = reqwest::blocking::get(&download_link)
+    pub async fn download_addon(&self, url: &str) -> Result<Addon> {
+        let response = reqwest::get(url)
+            .await
+            .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?
+            .text()
+            .await
             .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 
         let mut tmpfile = tempfile()?;
-        response
-            .copy_to(&mut tmpfile)
-            .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
+        copy(&mut response.as_bytes(), &mut tmpfile)?;
         let mut archive = zip::ZipArchive::new(tmpfile)
             .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 

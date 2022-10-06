@@ -25,38 +25,38 @@ pub fn get_cdn_download_link(doc: Html) -> Option<String> {
     link_node.map(|node| node.value().attr("href").unwrap().to_owned())
 }
 
-pub fn get_document(url: &str) -> Result<Html> {
-    let mut response = reqwest::blocking::get(url)
-        .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
+// pub fn get_document(url: &str) -> Result<Html> {
+//     let mut response = reqwest::blocking::get(url)
+//         .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 
-    let mut buf = Vec::new();
+//    let mut buf = Vec::new();
 
-    response
-        .read_to_end(&mut buf)
-        .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
+//    response
+//        .read_to_end(&mut buf)
+//        .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 
-    let document = Html::parse_document(&String::from_utf8_lossy(&buf));
+//    let document = Html::parse_document(&String::from_utf8_lossy(&buf));
 
-    Ok(document)
-}
+//     Ok(document)
+// }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use scraper::Selector;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use scraper::Selector;
 
-    #[test]
-    fn test_get_document() {
-        let url = "https://example.com/";
+//     #[test]
+//     fn test_get_document() {
+//         let url = "https://example.com/";
 
-        let doc = get_document(url);
-        assert!(doc.is_ok());
+//         let doc = get_document(url);
+//         assert!(doc.is_ok());
 
-        let doc = doc.unwrap();
+//         let doc = doc.unwrap();
 
-        let selector = Selector::parse("title").unwrap();
-        let title = doc.select(&selector).next().unwrap();
+//         let selector = Selector::parse("title").unwrap();
+//         let title = doc.select(&selector).next().unwrap();
 
-        assert_eq!(title.inner_html(), "Example Domain");
-    }
-}
+//         assert_eq!(title.inner_html(), "Example Domain");
+//     }
+// }

@@ -12,9 +12,9 @@ pub struct ApiClient {
     endpoint_url: String,
     client: reqwest::Client,
     game_config_url: String,
-    file_list_url: String,
-    file_details_url: String,
-    list_files_url: String,
+    pub file_list_url: String,
+    pub file_details_url: String,
+    pub list_files_url: String,
 }
 
 impl ApiClient {
@@ -42,15 +42,8 @@ impl ApiClient {
                 break;
             }
         }
-        println!("{}", self.game_config_url);
-
         // update game endpoints
         self.get_game_config().await?;
-
-        println!("{}", self.file_list_url);
-        println!("{}", self.file_details_url);
-        println!("{}", self.list_files_url);
-
         Ok(())
     }
 
@@ -64,7 +57,8 @@ impl ApiClient {
 
     pub async fn get_file_details(&mut self, id: u16) -> Result<FileDetails> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
-        let res = self.req_url::<FileDetails>(&req_url).await?;
+        let res = self.req_url::<Vec<FileDetails>>(&req_url).await?;
+        let res = res.first().cloned().unwrap();
         Ok(res)
     }
 
@@ -78,6 +72,7 @@ impl ApiClient {
     }
 
     async fn req_url<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
+        println!("Requesting: {}", url);
         let res = self
             .client
             .get(url)

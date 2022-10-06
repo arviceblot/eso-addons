@@ -1,13 +1,17 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct FileDetails {
     #[serde(rename = "UID")]
-    id: u16,
+    pub id: String,
     #[serde(rename = "UIFileName")]
-    file_name: String,
+    pub file_name: String,
     #[serde(rename = "UIDownload")]
-    download_url: String,
+    pub download_url: String,
+    #[serde(rename = "UIVersion")]
+    pub version: String,
+    #[serde(rename = "UIDate")]
+    pub date: u64,
 }
 
 #[derive(Deserialize)]
