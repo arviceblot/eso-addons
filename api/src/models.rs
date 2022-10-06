@@ -13,13 +13,15 @@ pub struct FileDetails {
 #[derive(Deserialize)]
 pub struct FileListItem {
     #[serde(rename = "UID")]
-    id: u16,
+    pub id: String,
     #[serde(rename = "UIVersion")]
-    version: String,
+    pub version: String,
     #[serde(rename = "UIDate")]
-    date: String,
+    pub date: u64,
     #[serde(rename = "UIName")]
-    name: String,
+    pub name: String,
+    #[serde(rename = "UICATID")]
+    pub category: String,
     // UIDir (List)
 }
 

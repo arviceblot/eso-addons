@@ -1,6 +1,9 @@
 use colored::*;
+use entity::addon as DbAddon;
 use eso_addons_api::ApiClient;
 use eso_addons_core::{addons::Manager, config::Config};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 
 use super::errors::*;
 
@@ -13,12 +16,45 @@ impl UpdateCommand {
         config: &Config,
         addon_manager: &Manager,
         client: &mut ApiClient,
+        db: &DatabaseConnection,
     ) -> Result<()> {
         // update endpoints from api
         client
             .update_endpoints()
             .await
             .map_err(|err| Error::Other(Box::new(err)))?;
+        let file_list = client
+            .get_file_list()
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        let mut insert_addons = vec![];
+        for list_item in file_list.iter() {
+            let addon = DbAddon::ActiveModel {
+                id: ActiveValue::Set(list_item.id.parse().unwrap()),
+                category_id: ActiveValue::Set(list_item.category.to_owned()),
+                version: ActiveValue::Set(list_item.version.to_owned()),
+                date: ActiveValue::Set(list_item.date),
+                name: ActiveValue::Set(list_item.name.to_owned()),
+                ..Default::default()
+            };
+
+            insert_addons.push(addon);
+        }
+        DbAddon::Entity::insert_many(insert_addons)
+            .on_conflict(
+                OnConflict::column(DbAddon::Column::Id)
+                    .update_columns([
+                        DbAddon::Column::CategoryId,
+                        DbAddon::Column::Version,
+                        DbAddon::Column::Date,
+                        DbAddon::Column::Name,
+                    ])
+                    .to_owned(),
+            )
+            .exec(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+
         // write to app data
 
         let desired_addons = &config.addons;
