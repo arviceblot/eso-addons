@@ -10,6 +10,7 @@ use eso_addons_core::addons;
 use eso_addons_core::config;
 use eso_addons_core::config::{EAM_CONF, EAM_DATA_DIR, EAM_DB};
 use migration::{Migrator, MigratorTrait};
+use std::fs::File;
 use std::path::PathBuf;
 
 mod add;
@@ -65,16 +66,19 @@ pub async fn run() -> Result<()> {
 
     let mut client = ApiClient::new("https://api.mmoui.com/v3");
 
-    let database_url = format!(
-        "sqlite://{}",
-        config_dir.join(EAM_DATA_DIR).join(EAM_DB).to_string_lossy()
-    );
-    // let connection = sea_orm::Database::connect(&database_url).await?;
-    // Migrator::up(&connection, None).await?;
+    // create db file if not exists
+    let db_file = config_dir.join(EAM_DATA_DIR).join(EAM_DB);
+    if !db_file.exists() {
+        File::create(db_file.to_owned()).unwrap();
+    }
+    // setup database connection and apply migrations if needed
+    let database_url = format!("sqlite://{}", db_file.to_string_lossy());
+    let db = sea_orm::Database::connect(&database_url).await.unwrap();
+    Migrator::up(&db, None).await.unwrap();
 
     match opts.subcmd {
         SubCommand::List(list) => list.run(&addon_manager, &config),
-        SubCommand::Update(update) => update.run(&config, &addon_manager, &mut client).await,
+        SubCommand::Update(update) => update.run(&config, &addon_manager, &mut client, &db).await,
         SubCommand::Clean(mut clean) => clean
             .run(&config, &addon_manager)
             .map_err(|err| Error::Other(err)),
