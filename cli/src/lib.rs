@@ -18,6 +18,7 @@ mod clean;
 mod errors;
 mod list;
 mod remove;
+mod search;
 mod update;
 
 use errors::{Error, Result};
@@ -47,6 +48,8 @@ enum SubCommand {
     Add(add::AddCommand),
     #[clap(about = "Uninstall addon")]
     Remove(remove::RemoveCommand),
+    #[clap(about = "Search addons")]
+    Search(search::SearchCommand),
 }
 
 pub async fn run() -> Result<()> {
@@ -78,11 +81,31 @@ pub async fn run() -> Result<()> {
 
     match opts.subcmd {
         SubCommand::List(list) => list.run(&addon_manager, &config),
-        SubCommand::Update(update) => update.run(&config, &addon_manager, &mut client, &db).await,
+        SubCommand::Update(update) => {
+            update
+                .run(
+                    &mut config,
+                    &config_filepath,
+                    &addon_manager,
+                    &mut client,
+                    &db,
+                )
+                .await
+        }
         SubCommand::Clean(mut clean) => clean
             .run(&config, &addon_manager)
             .map_err(|err| Error::Other(err)),
-        SubCommand::Add(mut add) => add.run(&mut config, &config_filepath, &addon_manager),
+        SubCommand::Add(mut add) => {
+            add.run(
+                &mut config,
+                &config_filepath,
+                &addon_manager,
+                &mut client,
+                &db,
+            )
+            .await
+        }
         SubCommand::Remove(remove) => remove.run(&mut config, &config_filepath, &addon_manager),
+        SubCommand::Search(mut search) => search.run(&db).await,
     }
 }

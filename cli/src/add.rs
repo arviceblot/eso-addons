@@ -1,99 +1,71 @@
 use clap::Parser;
-use eso_addons_core::{
-    addons,
-    addons::Manager,
-    config::{self, AddonEntry, Config},
-    htmlparser,
-};
+use entity::addon as DbAddon;
+use entity::installed_addon as InstalledAddon;
+use eso_addons_api::ApiClient;
+use eso_addons_core::{addons::Manager, config::Config};
+use sea_orm::ActiveModelTrait;
+use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 use std::path::Path;
 
 use super::{Error, Result};
 
 #[derive(Parser)]
 pub struct AddCommand {
-    addon_url: Option<String>,
-    #[clap(
-        short,
-        long,
-        help = "Indicate, if the addon is only a dependency for another addon"
-    )]
-    #[clap(short)]
-    dependency: bool,
+    addon_id: i32,
 }
 
 impl AddCommand {
-    pub fn run(
+    pub async fn run(
         &mut self,
         cfg: &mut Config,
         config_filepath: &Path,
         addon_manager: &Manager,
+        client: &mut ApiClient,
+        db: &DatabaseConnection,
     ) -> Result<()> {
-        let mut entry = self.get_entry()?;
+        // update endpoints from config
+        client.file_details_url = cfg.file_details.to_owned();
 
-        if cfg.addons.iter().find(|el| el.url == entry.url).is_some() {
-            println!("Addon {} is already installed", &entry.name);
-            return Ok(());
+        let entry = DbAddon::Entity::find_by_id(self.addon_id)
+            .one(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        let mut entry: DbAddon::ActiveModel = entry.unwrap().into();
+        let installed_entry = InstalledAddon::Entity::find_by_id(self.addon_id)
+            .one(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        let file_details = client
+            .get_file_details(self.addon_id.try_into().unwrap())
+            .await?;
+
+        match installed_entry {
+            Some(installed_entry) => {
+                if installed_entry.date as u64 == file_details.date {
+                    println!("Addon {} is already installed", entry.name.unwrap());
+                    return Ok(());
+                }
+            }
+            None => (),
         }
 
-        let installed = addon_manager.download_addon(&entry.url.clone().unwrap())?;
+        entry.download = ActiveValue::Set(Some(file_details.download_url.to_owned()));
+        entry.version = ActiveValue::Set(file_details.version.to_owned());
+        entry.date = ActiveValue::Set(file_details.date.try_into().unwrap());
 
-        if entry.name != installed.name {
-            entry.name = installed.name;
-        }
-
-        cfg.addons.push(entry.clone());
-
-        config::save_config(config_filepath, &cfg)?;
-
-        println!("🎊 Installed {}!", &entry.name);
-
-        Ok(())
-    }
-
-    pub fn get_entry(&mut self) -> Result<AddonEntry> {
-        if self.addon_url.is_none() {
-            self.ask_for_fields()?;
-        }
-
-        let addon_url = self
-            .addon_url
-            .clone()
-            .ok_or(Error::Other("missing addon URL".into()))?;
-        let dependency = self.dependency;
-
-        let addon_name = htmlparser::get_document(&addon_url)
-            .map(htmlparser::get_addon_name)?
-            .ok_or(Error::Other("failed to get addon name".into()))?;
-
-        let download_url = addons::get_download_url(&addon_url);
-
-        Ok(AddonEntry {
-            name: addon_name,
-            url: download_url,
-            dependency: dependency,
-        })
-    }
-
-    fn ask_for_fields(&mut self) -> Result<()> {
-        let questions = vec![
-            requestty::Question::input("addon_url")
-                .message("URL of the addon on esoui.com")
-                .build(),
-            requestty::Question::confirm("dependency")
-                .message("Is addon only a dependency?")
-                .default(false)
-                .build(),
-        ];
-
-        let answers = requestty::prompt(questions).map_err(|err| Error::Other(Box::new(err)))?;
-
-        if let Some(addon_url) = answers.get("addon_url") {
-            self.addon_url = addon_url.as_string().map(|x| x.to_owned());
+        let installed = addon_manager.download_addon(&file_details.download_url);
+        let installed_entry = InstalledAddon::ActiveModel {
+            addon_id: ActiveValue::Set(self.addon_id),
+            version: ActiveValue::Set(file_details.version),
+            date: ActiveValue::Set(file_details.date.try_into().unwrap()),
         };
+        installed_entry.insert(db).await;
 
-        if let Some(dependency) = answers.get("dependency") {
-            self.dependency = dependency.as_bool().unwrap_or(false);
-        };
+        // cfg.addons.push(entry.clone());
+
+        // config::save_config(config_filepath, &cfg)?;
+
+        println!("🎊 Installed {}!", entry.name.unwrap());
 
         Ok(())
     }

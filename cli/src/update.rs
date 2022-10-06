@@ -1,6 +1,9 @@
+use std::path::Path;
+
 use colored::*;
 use entity::addon as DbAddon;
 use eso_addons_api::ApiClient;
+use eso_addons_core::config;
 use eso_addons_core::{addons::Manager, config::Config};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
@@ -13,7 +16,8 @@ pub struct UpdateCommand {}
 impl UpdateCommand {
     pub async fn run(
         &self,
-        config: &Config,
+        config: &mut Config,
+        config_filepath: &Path,
         addon_manager: &Manager,
         client: &mut ApiClient,
         db: &DatabaseConnection,
@@ -33,7 +37,7 @@ impl UpdateCommand {
                 id: ActiveValue::Set(list_item.id.parse().unwrap()),
                 category_id: ActiveValue::Set(list_item.category.to_owned()),
                 version: ActiveValue::Set(list_item.version.to_owned()),
-                date: ActiveValue::Set(list_item.date),
+                date: ActiveValue::Set(list_item.date.try_into().unwrap()),
                 name: ActiveValue::Set(list_item.name.to_owned()),
                 ..Default::default()
             };
@@ -61,7 +65,7 @@ impl UpdateCommand {
 
         for addon in desired_addons.iter() {
             let installed = if let Some(ref url) = addon.url {
-                let installed = addon_manager.download_addon(&url)?;
+                let installed = addon_manager.download_addon(&url).await?;
                 Some(installed)
             } else {
                 addon_manager.get_addon(&addon.name)?
@@ -111,6 +115,12 @@ impl UpdateCommand {
                 println!("- {}", unused);
             }
         }
+
+        config.file_details = client.file_details_url.to_owned();
+        config.file_list = client.file_list_url.to_owned();
+        config.list_files = client.list_files_url.to_owned();
+
+        config::save_config(config_filepath, &config);
 
         Ok(())
     }

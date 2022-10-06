@@ -9,7 +9,7 @@ pub struct Model {
     pub id: i32,
     pub category_id: String,
     pub version: String,
-    pub date: u64,
+    pub date: i64,
     pub name: String,
     pub author_name: Option<String>,
     pub file_info_url: Option<String>,

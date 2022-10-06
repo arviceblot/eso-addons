@@ -27,6 +27,16 @@ pub struct Config {
     pub addon_dir: PathBuf,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub addons: Vec<AddonEntry>,
+    #[serde(rename = "FileList", default = "default_str")]
+    pub file_list: String,
+    #[serde(rename = "FileDetails", default = "default_str")]
+    pub file_details: String,
+    #[serde(rename = "ListFiles", default = "default_str")]
+    pub list_files: String,
+}
+
+fn default_str() -> String {
+    "".to_string()
 }
 
 impl serde::Serialize for AddonEntry {
@@ -49,12 +59,13 @@ pub fn parse_config(path: &Path) -> Result<Config> {
     }
 
     let config_data = fs::read_to_string(path).map_err(|_| Error::CannotLoadConfig)?;
-    let config: Config = toml::from_str(&config_data).map_err(|_| Error::CannotLoadConfig)?;
+    let config: Config = serde_json::from_str(&config_data).map_err(|_| Error::CannotLoadConfig)?;
     Ok(config)
 }
 
 pub fn save_config(path: &Path, cfg: &Config) -> Result<()> {
-    let config_str = toml::to_string(cfg).map_err(|err| Error::Other(Box::new(err)))?;
+    let config_str =
+        serde_json::to_string_pretty(cfg).map_err(|err| Error::Other(Box::new(err)))?;
     fs::write(path, config_str)?;
     Ok(())
 }
@@ -85,6 +96,9 @@ fn get_initial_config() -> Config {
     Config {
         addon_dir: addon_dir,
         addons: vec![],
+        file_details: "".to_string(),
+        file_list: "".to_string(),
+        list_files: "".to_string(),
     }
 }
 
