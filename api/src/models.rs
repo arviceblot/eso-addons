@@ -26,7 +26,8 @@ pub struct FileListItem {
     pub name: String,
     #[serde(rename = "UICATID")]
     pub category: String,
-    // UIDir (List)
+    #[serde(rename = "UIDir")]
+    pub directories: Vec<String>,
 }
 
 #[derive(Deserialize)]
