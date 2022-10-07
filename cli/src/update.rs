@@ -2,10 +2,13 @@ use std::path::Path;
 
 use colored::*;
 use entity::addon as DbAddon;
+use entity::addon_dir as AddonDir;
 use eso_addons_api::ApiClient;
 use eso_addons_core::config;
 use eso_addons_core::{addons::Manager, config::Config};
 use sea_orm::sea_query::OnConflict;
+use sea_orm::ColumnTrait;
+use sea_orm::QueryFilter;
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 
 use super::errors::*;
@@ -31,16 +34,28 @@ impl UpdateCommand {
             .get_file_list()
             .await
             .map_err(|err| Error::Other(Box::new(err)))?;
+
         let mut insert_addons = vec![];
+        let mut insert_addon_dirs = vec![];
+        let mut addon_ids = vec![];
         for list_item in file_list.iter() {
+            let addon_id: i32 = list_item.id.parse().unwrap();
+            addon_ids.push(addon_id);
             let addon = DbAddon::ActiveModel {
-                id: ActiveValue::Set(list_item.id.parse().unwrap()),
+                id: ActiveValue::Set(addon_id),
                 category_id: ActiveValue::Set(list_item.category.to_owned()),
                 version: ActiveValue::Set(list_item.version.to_owned()),
                 date: ActiveValue::Set(list_item.date.try_into().unwrap()),
                 name: ActiveValue::Set(list_item.name.to_owned()),
                 ..Default::default()
             };
+            for addon_dir in list_item.directories.iter() {
+                let addon_dir_model = AddonDir::ActiveModel {
+                    addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
+                    dir: ActiveValue::Set(addon_dir.to_string()),
+                };
+                insert_addon_dirs.push(addon_dir_model);
+            }
 
             insert_addons.push(addon);
         }
@@ -55,6 +70,17 @@ impl UpdateCommand {
                     ])
                     .to_owned(),
             )
+            .exec(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        // delete existing addon directories in case any are removed
+        AddonDir::Entity::delete_many()
+            .filter(AddonDir::Column::AddonId.is_in(addon_ids))
+            .exec(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        // Add addon directories for dependency checks
+        AddonDir::Entity::insert_many(insert_addon_dirs)
             .exec(db)
             .await
             .map_err(|err| Error::Other(Box::new(err)))?;

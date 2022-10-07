@@ -24,7 +24,7 @@ impl SearchCommand {
                 .all(db)
                 .await
                 .map_err(|err| Error::Other(Box::new(err)))?;
-            print!("{} {}", addon.id, addon.name);
+            print!("{:>4} {}", addon.id, addon.name);
             if installed.len() > 0 {
                 println!(" {}", "(installed)".green().bold());
             } else {

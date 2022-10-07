@@ -54,6 +54,7 @@ impl AddCommand {
         entry.date = ActiveValue::Set(file_details.date.try_into().unwrap());
 
         let installed = addon_manager.download_addon(&file_details.download_url);
+        // TODO: process dependencies from installed addon
         let installed_entry = InstalledAddon::ActiveModel {
             addon_id: ActiveValue::Set(self.addon_id),
             version: ActiveValue::Set(file_details.version),
