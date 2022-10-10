@@ -1,11 +1,10 @@
 use crate::errors::{Error, Result};
-use crate::htmlparser;
 
 use regex::Regex;
 use std::fs::{self, File};
-use std::io::{self, copy, BufRead};
+use std::io::{self, BufRead, Seek, Write};
 use std::path::{Path, PathBuf};
-use tempfile::tempfile;
+use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 #[derive(Debug)]
@@ -132,17 +131,25 @@ impl Manager {
         Ok(())
     }
 
-    pub async fn download_addon(&self, url: &str) -> Result<Addon> {
-        let response = reqwest::get(url)
+    pub async fn download_addon(&self, url: &str, client: &reqwest::Client) -> Result<Addon> {
+        let response = client
+            .get(url)
+            .send()
             .await
             .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?
-            .text()
+            .bytes()
             .await
             .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 
-        let mut tmpfile = tempfile()?;
-        copy(&mut response.as_bytes(), &mut tmpfile)?;
-        let mut archive = zip::ZipArchive::new(tmpfile)
+        let mut tmpfile = NamedTempFile::new()?;
+        let mut r_tmpfile = tmpfile.reopen()?;
+        match tmpfile.write_all(&mut response.as_ref()) {
+            Ok(()) => (),
+            Err(err) => return Err(Error::CannotDownloadAddon(url.to_owned(), Box::new(err))),
+        }
+        r_tmpfile.rewind().unwrap();
+
+        let mut archive = zip::ZipArchive::new(r_tmpfile)
             .map_err(|err| Error::CannotDownloadAddon(url.to_owned(), Box::new(err)))?;
 
         for i in 0..archive.len() {

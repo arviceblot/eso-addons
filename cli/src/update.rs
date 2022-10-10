@@ -1,14 +1,16 @@
 use std::path::Path;
 
-use colored::*;
+use super::add::install_addon;
 use entity::addon as DbAddon;
 use entity::addon_dir as AddonDir;
+use entity::installed_addon as InstalledAddon;
 use eso_addons_api::ApiClient;
-use eso_addons_core::config;
 use eso_addons_core::{addons::Manager, config::Config};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ColumnTrait;
+use sea_orm::DatabaseBackend;
 use sea_orm::QueryFilter;
+use sea_orm::Statement;
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 
 use super::errors::*;
@@ -85,68 +87,87 @@ impl UpdateCommand {
             .await
             .map_err(|err| Error::Other(Box::new(err)))?;
 
+        // update all addons that have a newer date than installed date
+        let updates = InstalledAddon::Entity::find()
+            .from_raw_sql(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                r#"SELECT
+                i.*
+            FROM installed_addon i
+            inner join addon a on i.addon_id  = a.id
+            where i.date < a.date"#
+                    .to_string(),
+            ))
+            .into_model::<InstalledAddon::Model>()
+            .all(db)
+            .await
+            .map_err(|err| Error::Other(Box::new(err)))?;
+        for update in updates.iter() {
+            install_addon(update.addon_id, db, client, addon_manager).await?;
+        }
+
         // write to app data
 
-        let desired_addons = &config.addons;
+        // let desired_addons = &config.addons;
 
-        for addon in desired_addons.iter() {
-            let installed = if let Some(ref url) = addon.url {
-                let installed = addon_manager.download_addon(&url).await?;
-                Some(installed)
-            } else {
-                addon_manager.get_addon(&addon.name)?
-            };
+        // for addon in desired_addons.iter() {
+        //     let installed = if let Some(ref url) = addon.url {
+        //         let installed = addon_manager.download_addon(&url, &client.client).await?;
+        //         Some(installed)
+        //     } else {
+        //         addon_manager.get_addon(&addon.name)?
+        //     };
 
-            if let Some(installed) = installed {
-                if installed.name == addon.name {
-                    println!("{} Updated {}!", "✔".green(), addon.name);
-                } else {
-                    println!(
-                        // TODO: change the name in the config automatically
-                        "⚠ Installed {}, but is called {} is config file. Verify the addon name in the config file.",
-                        installed.name, addon.name
-                    );
-                }
-            } else {
-                println!(
-                    "⚠ {} is set to be manually installed, but not present",
-                    addon.name
-                )
-            }
-        }
+        //     if let Some(installed) = installed {
+        //         if installed.name == addon.name {
+        //             println!("{} Updated {}!", "✔".green(), addon.name);
+        //         } else {
+        //             println!(
+        //                 // TODO: change the name in the config automatically
+        //                 "⚠ Installed {}, but is called {} is config file. Verify the addon name in the config file.",
+        //                 installed.name, addon.name
+        //             );
+        //         }
+        //     } else {
+        //         println!(
+        //             "⚠ {} is set to be manually installed, but not present",
+        //             addon.name
+        //         )
+        //     }
+        // }
 
-        let installed_addons_list = addon_manager.get_addons()?;
-        let missing_addons: Vec<String> =
-            eso_addons_core::get_missing_dependencies(&installed_addons_list.addons).collect();
+        // let installed_addons_list = addon_manager.get_addons()?;
+        // let missing_addons: Vec<String> =
+        //     eso_addons_core::get_missing_dependencies(&installed_addons_list.addons).collect();
 
-        if missing_addons.len() > 0 {
-            println!(
-                "\n{} There are missing dependencies! Please install the following addons to resolve the dependencies:",
-                "⚠".red()
-            );
+        // if missing_addons.len() > 0 {
+        //     println!(
+        //         "\n{} There are missing dependencies! Please install the following addons to resolve the dependencies:",
+        //         "⚠".red()
+        //     );
 
-            for missing in eso_addons_core::get_missing_dependencies(&installed_addons_list.addons)
-            {
-                println!("- {}", missing);
-            }
-        }
+        //     for missing in eso_addons_core::get_missing_dependencies(&installed_addons_list.addons)
+        //     {
+        //         println!("- {}", missing);
+        //     }
+        // }
 
-        let unused_addons =
-            eso_addons_core::get_unused_dependencies(&installed_addons_list.addons, desired_addons);
+        // let unused_addons =
+        //     eso_addons_core::get_unused_dependencies(&installed_addons_list.addons, desired_addons);
 
-        if unused_addons.len() > 0 {
-            println!("\nThere are unused dependencies:");
+        // if unused_addons.len() > 0 {
+        //     println!("\nThere are unused dependencies:");
 
-            for unused in unused_addons {
-                println!("- {}", unused);
-            }
-        }
+        //     for unused in unused_addons {
+        //         println!("- {}", unused);
+        //     }
+        // }
 
-        config.file_details = client.file_details_url.to_owned();
-        config.file_list = client.file_list_url.to_owned();
-        config.list_files = client.list_files_url.to_owned();
+        // config.file_details = client.file_details_url.to_owned();
+        // config.file_list = client.file_list_url.to_owned();
+        // config.list_files = client.list_files_url.to_owned();
 
-        config::save_config(config_filepath, &config);
+        // config::save_config(config_filepath, &config).unwrap();
 
         Ok(())
     }

@@ -85,27 +85,19 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(AddonDependency::DependencyId)
-                            .integer()
+                        ColumnDef::new(AddonDependency::DependencyDir)
+                            .string()
                             .not_null(),
                     )
                     .primary_key(
                         Index::create()
                             .col(AddonDependency::AddonId)
-                            .col(AddonDependency::DependencyId),
+                            .col(AddonDependency::DependencyDir),
                     )
                     .foreign_key(
                         ForeignKey::create()
                             .name("FK_addon_dependency_addon")
                             .from(AddonDependency::Table, AddonDependency::AddonId)
-                            .to(Addon::Table, Addon::Id)
-                            .on_delete(ForeignKeyAction::NoAction)
-                            .on_update(ForeignKeyAction::NoAction),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("FK_addon_dependency_dependency")
-                            .from(AddonDependency::Table, AddonDependency::DependencyId)
                             .to(Addon::Table, Addon::Id)
                             .on_delete(ForeignKeyAction::NoAction)
                             .on_update(ForeignKeyAction::NoAction),
@@ -166,5 +158,5 @@ enum AddonDir {
 enum AddonDependency {
     Table,
     AddonId,
-    DependencyId,
+    DependencyDir,
 }
