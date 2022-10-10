@@ -8,19 +8,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub addon_id: i32,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub dependency_id: i32,
+    pub dependency_dir: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::addon::Entity",
-        from = "Column::DependencyId",
-        to = "super::addon::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Addon2,
     #[sea_orm(
         belongs_to = "super::addon::Entity",
         from = "Column::AddonId",
@@ -28,7 +20,13 @@ pub enum Relation {
         on_update = "NoAction",
         on_delete = "NoAction"
     )]
-    Addon1,
+    Addon,
+}
+
+impl Related<super::addon::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Addon.def()
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

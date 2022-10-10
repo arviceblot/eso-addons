@@ -95,16 +95,7 @@ pub async fn run() -> Result<()> {
         SubCommand::Clean(mut clean) => clean
             .run(&config, &addon_manager)
             .map_err(|err| Error::Other(err)),
-        SubCommand::Add(mut add) => {
-            add.run(
-                &mut config,
-                &config_filepath,
-                &addon_manager,
-                &mut client,
-                &db,
-            )
-            .await
-        }
+        SubCommand::Add(add) => add.run(&mut config, &addon_manager, &mut client, &db).await,
         SubCommand::Remove(remove) => remove.run(&mut config, &config_filepath, &addon_manager),
         SubCommand::Search(mut search) => search.run(&db).await,
     }

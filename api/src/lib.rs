@@ -10,7 +10,7 @@ const GAME_ID: &str = "ESO";
 
 pub struct ApiClient {
     endpoint_url: String,
-    client: reqwest::Client,
+    pub client: reqwest::Client,
     game_config_url: String,
     pub file_list_url: String,
     pub file_details_url: String,
@@ -55,7 +55,7 @@ impl ApiClient {
         Ok(res)
     }
 
-    pub async fn get_file_details(&mut self, id: u16) -> Result<FileDetails> {
+    pub async fn get_file_details(&self, id: u16) -> Result<FileDetails> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
         let res = self.req_url::<Vec<FileDetails>>(&req_url).await?;
         let res = res.first().cloned().unwrap();
