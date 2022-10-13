@@ -1,4 +1,5 @@
 use clap::Parser;
+use colored::*;
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::installed_addon as InstalledAddon;
@@ -29,7 +30,7 @@ impl AddCommand {
         // update endpoints from config
         client.file_details_url = cfg.file_details.to_owned();
 
-        let installed = install_addon(self.addon_id, db, client, addon_manager).await;
+        let installed = install_addon(self.addon_id, db, client, addon_manager, false).await;
         match installed {
             Ok(()) => (),
             Err(installed) => return Err(installed),
@@ -49,6 +50,7 @@ pub async fn install_addon(
     db: &DatabaseConnection,
     client: &ApiClient,
     addon_manager: &Manager,
+    update: bool,
 ) -> Result<()> {
     let entry = DbAddon::Entity::find_by_id(addon_id)
         .one(db)
@@ -66,7 +68,10 @@ pub async fn install_addon(
     match installed_entry {
         Some(installed_entry) => {
             if installed_entry.date as u64 == file_details.date {
-                println!("Addon {} is already installed", entry.name.unwrap());
+                println!(
+                    "Addon {} is already installed and up to date",
+                    entry.name.unwrap()
+                );
                 return Ok(());
             }
         }
@@ -86,8 +91,25 @@ pub async fn install_addon(
         date: ActiveValue::Set(file_details.date.try_into().unwrap()),
     };
 
-    match installed_entry.insert(db).await {
-        Ok(_) => println!("🎊 Installed {}!", entry.name.unwrap()),
+    match InstalledAddon::Entity::insert(installed_entry)
+        .on_conflict(
+            OnConflict::column(InstalledAddon::Column::AddonId)
+                .update_columns([
+                    InstalledAddon::Column::Date,
+                    InstalledAddon::Column::Version,
+                ])
+                .to_owned(),
+        )
+        .exec(db)
+        .await
+    {
+        Ok(_) => {
+            if !update {
+                println!("🎊 Installed {}!", entry.name.unwrap());
+            } else {
+                println!("{} Updated {}!", "✔".green(), entry.name.unwrap());
+            }
+        }
         Err(error) => return Err(Error::Other(Box::new(error))),
     }
 
