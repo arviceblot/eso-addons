@@ -103,7 +103,10 @@ impl UpdateCommand {
             .await
             .map_err(|err| Error::Other(Box::new(err)))?;
         for update in updates.iter() {
-            install_addon(update.addon_id, db, client, addon_manager).await?;
+            install_addon(update.addon_id, db, client, addon_manager, true).await?;
+        }
+        if updates.len() == 0 {
+            println!("Everything up to date!");
         }
 
         // write to app data
