@@ -10,6 +10,7 @@ use eso_addons_core::addons;
 use eso_addons_core::config;
 use eso_addons_core::config::{EAM_CONF, EAM_DATA_DIR, EAM_DB};
 use migration::{Migrator, MigratorTrait};
+use std::fs;
 use std::fs::File;
 use std::path::PathBuf;
 
@@ -55,9 +56,12 @@ enum SubCommand {
 pub async fn run() -> Result<()> {
     let opts: Opts = Opts::parse();
 
-    let config_dir = dirs::config_dir().unwrap();
+    let config_dir = dirs::config_dir().unwrap().join(EAM_DATA_DIR);
+    if !config_dir.exists() {
+        fs::create_dir_all(config_dir.to_owned()).unwrap();
+    }
 
-    let default_config_filepath = config_dir.join(EAM_DATA_DIR).join(EAM_CONF);
+    let default_config_filepath = config_dir.join(EAM_CONF);
     let config_filepath = opts
         .config
         .map(|x| PathBuf::from(&x))
@@ -70,7 +74,7 @@ pub async fn run() -> Result<()> {
     let mut client = ApiClient::new("https://api.mmoui.com/v3");
 
     // create db file if not exists
-    let db_file = config_dir.join(EAM_DATA_DIR).join(EAM_DB);
+    let db_file = config_dir.join(EAM_DB);
     if !db_file.exists() {
         File::create(db_file.to_owned()).unwrap();
     }

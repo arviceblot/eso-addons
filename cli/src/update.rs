@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::add::install_addon;
+use super::add::{get_missing_dependency_options, install_addon};
 use entity::addon as DbAddon;
 use entity::addon_dir as AddonDir;
 use entity::installed_addon as InstalledAddon;
@@ -13,6 +13,7 @@ use sea_orm::QueryFilter;
 use sea_orm::Statement;
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 
+use super::config;
 use super::errors::*;
 
 #[derive(Parser)]
@@ -88,6 +89,7 @@ impl UpdateCommand {
             .map_err(|err| Error::Other(Box::new(err)))?;
 
         // update all addons that have a newer date than installed date
+        // TODO: maybe rewrite this using query builder
         let updates = InstalledAddon::Entity::find()
             .from_raw_sql(Statement::from_string(
                 DatabaseBackend::Sqlite,
@@ -109,68 +111,13 @@ impl UpdateCommand {
             println!("Everything up to date!");
         }
 
-        // write to app data
+        let _need_installs = get_missing_dependency_options(db).await;
 
-        // let desired_addons = &config.addons;
+        config.file_details = client.file_details_url.to_owned();
+        config.file_list = client.file_list_url.to_owned();
+        config.list_files = client.list_files_url.to_owned();
 
-        // for addon in desired_addons.iter() {
-        //     let installed = if let Some(ref url) = addon.url {
-        //         let installed = addon_manager.download_addon(&url, &client.client).await?;
-        //         Some(installed)
-        //     } else {
-        //         addon_manager.get_addon(&addon.name)?
-        //     };
-
-        //     if let Some(installed) = installed {
-        //         if installed.name == addon.name {
-        //             println!("{} Updated {}!", "✔".green(), addon.name);
-        //         } else {
-        //             println!(
-        //                 // TODO: change the name in the config automatically
-        //                 "⚠ Installed {}, but is called {} is config file. Verify the addon name in the config file.",
-        //                 installed.name, addon.name
-        //             );
-        //         }
-        //     } else {
-        //         println!(
-        //             "⚠ {} is set to be manually installed, but not present",
-        //             addon.name
-        //         )
-        //     }
-        // }
-
-        // let installed_addons_list = addon_manager.get_addons()?;
-        // let missing_addons: Vec<String> =
-        //     eso_addons_core::get_missing_dependencies(&installed_addons_list.addons).collect();
-
-        // if missing_addons.len() > 0 {
-        //     println!(
-        //         "\n{} There are missing dependencies! Please install the following addons to resolve the dependencies:",
-        //         "⚠".red()
-        //     );
-
-        //     for missing in eso_addons_core::get_missing_dependencies(&installed_addons_list.addons)
-        //     {
-        //         println!("- {}", missing);
-        //     }
-        // }
-
-        // let unused_addons =
-        //     eso_addons_core::get_unused_dependencies(&installed_addons_list.addons, desired_addons);
-
-        // if unused_addons.len() > 0 {
-        //     println!("\nThere are unused dependencies:");
-
-        //     for unused in unused_addons {
-        //         println!("- {}", unused);
-        //     }
-        // }
-
-        // config.file_details = client.file_details_url.to_owned();
-        // config.file_list = client.file_list_url.to_owned();
-        // config.list_files = client.list_files_url.to_owned();
-
-        // config::save_config(config_filepath, &config).unwrap();
+        config::save_config(config_filepath, &config).unwrap();
 
         Ok(())
     }
