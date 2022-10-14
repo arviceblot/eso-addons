@@ -89,9 +89,12 @@ fn get_initial_config() -> Config {
 
 #[cfg(target_os = "linux")]
 fn get_initial_config() -> Config {
-    let home_dir = dirs::home_dir().unwrap();
-    let addon_dir =
-        home_dir.join("drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns");
+    // steam deck defaults
+    let hostname = hostname::get().unwrap().into_string().unwrap();
+    let addon_dir = match hostname.as_str() {
+        "steamdeck" => PathBuf::from("/home/deck/.local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns"),
+        _ => dirs::home_dir().unwrap().join("drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns")
+    };
 
     Config {
         addon_dir: addon_dir,

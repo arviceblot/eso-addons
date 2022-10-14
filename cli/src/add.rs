@@ -6,7 +6,6 @@ use entity::installed_addon as InstalledAddon;
 use eso_addons_api::ApiClient;
 use eso_addons_core::{addons::Manager, config::Config};
 use sea_orm::sea_query::OnConflict;
-use sea_orm::ActiveModelTrait;
 use sea_orm::DatabaseBackend;
 use sea_orm::FromQueryResult;
 use sea_orm::Statement;
@@ -133,7 +132,8 @@ pub async fn install_addon(
     Ok(())
 }
 
-async fn get_missing_dependency_options(db: &DatabaseConnection) -> Vec<AddonDepOption> {
+pub async fn get_missing_dependency_options(db: &DatabaseConnection) -> Vec<AddonDepOption> {
+    // TODO: maybe rewrite this using query builder
     let need_installs = AddonDep::Entity::find()
         .from_raw_sql(Statement::from_string(
             DatabaseBackend::Sqlite,
@@ -173,7 +173,7 @@ async fn get_missing_dependency_options(db: &DatabaseConnection) -> Vec<AddonDep
 }
 
 #[derive(FromQueryResult)]
-struct AddonDepOption {
+pub struct AddonDepOption {
     id: i32,
     name: String,
     dir: String,
