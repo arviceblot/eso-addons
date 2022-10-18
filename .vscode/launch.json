@@ -1,0 +1,103 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'eso-addons'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "eso-addons",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'eso-addons'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=eso-addons",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "eso-addons",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'eso-addons'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=eso-addons",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "eso-addons",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'manager'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=manager",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "manager",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'eso-addons' update",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=eso-addons",
+                    "--package=eso-addons"
+                ],
+                "filter": {
+                    "name": "eso-addons",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "update"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+    ]
+}
