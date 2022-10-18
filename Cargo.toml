@@ -1,16 +1,16 @@
 [package]
-name = "eso-addons"
+name = "eso-addon-manager"
 version = "0.3.0"
 authors = ["Damian Czaja <trojan295@protonmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-members = [".", "api", "cli", "entity", "migration"]
+members = [".", "api", "cli", "core", "entity", "migration"]
 
 [[bin]]
-name = "eso-addons"
-path = "src/main.rs"
+name = "eso-addon-manager-cli"
+path = "src/bin/cli.rs"
 
 
 [dependencies]
