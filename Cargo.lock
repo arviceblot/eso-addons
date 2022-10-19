@@ -92,11 +92,17 @@ checksum = "98161a4e3e2184da77bb14f02184cdd111e83bbbcc9979dfee3c44b9a85f5602"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "dirs 4.0.0",
+ "entity",
  "eso-addons-api",
+ "eso-addons-core",
+ "migration",
+ "sea-orm",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tokio",
 ]
 
 [[package]]
@@ -1202,7 +1208,6 @@ dependencies = [
  "clap",
  "colored",
  "dirs 4.0.0",
- "eso-addons-cli",
  "eso-addons-core",
  "openssl",
  "prettytable-rs 0.9.0",
@@ -1224,28 +1229,10 @@ dependencies = [
 name = "eso-addons-api"
 version = "0.1.0"
 dependencies = [
- "eso-addons-core",
  "reqwest",
  "serde",
  "serde_derive",
  "tokio",
-]
-
-[[package]]
-name = "eso-addons-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "colored",
- "dirs 4.0.0",
- "entity",
- "eso-addons-api",
- "eso-addons-core",
- "futures",
- "migration",
- "prettytable-rs 0.8.0",
- "requestty",
- "sea-orm",
 ]
 
 [[package]]
@@ -1254,12 +1241,16 @@ version = "0.1.0"
 dependencies = [
  "colored",
  "dirs 4.0.0",
+ "entity",
+ "eso-addons-api",
  "hostname",
+ "migration",
  "prettytable-rs 0.8.0",
  "regex",
  "requestty",
  "reqwest",
  "scraper",
+ "sea-orm",
  "serde",
  "serde_derive",
  "serde_json",

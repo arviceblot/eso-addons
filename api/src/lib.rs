@@ -1,9 +1,8 @@
-pub mod errors;
 pub mod models;
 
-use models::*;
+use std::error::Error;
 
-use eso_addons_core::errors::{Error, Result};
+use models::*;
 
 const GLOBAL_CONFIG: &str = "globalconfig.json";
 const GAME_ID: &str = "ESO";
@@ -33,7 +32,7 @@ impl ApiClient {
         }
     }
 
-    pub async fn update_endpoints(&mut self) -> Result<()> {
+    pub async fn update_endpoints(&mut self) -> Result<(), Box<dyn Error>> {
         let req_url = format!("{}/{}", self.endpoint_url, GLOBAL_CONFIG);
         let res = self.req_url::<GlobalConfig>(&req_url).await?;
         for game in res.games {
@@ -47,7 +46,7 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn get_file_list(&mut self) -> Result<Vec<FileListItem>> {
+    pub async fn get_file_list(&mut self) -> Result<Vec<FileListItem>, Box<dyn Error>> {
         // Download and parse addon list
         let res = self
             .req_url::<Vec<FileListItem>>(&self.file_list_url)
@@ -55,14 +54,14 @@ impl ApiClient {
         Ok(res)
     }
 
-    pub async fn get_file_details(&self, id: u16) -> Result<FileDetails> {
+    pub async fn get_file_details(&self, id: u16) -> Result<FileDetails, Box<dyn Error>> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
-        let res = self.req_url::<Vec<FileDetails>>(&req_url).await?;
+        let res = self.req_url::<Vec<FileDetails>>(&req_url).await.unwrap();
         let res = res.first().cloned().unwrap();
         Ok(res)
     }
 
-    async fn get_game_config(&mut self) -> Result<()> {
+    async fn get_game_config(&mut self) -> Result<(), Box<dyn Error>> {
         let res = self.req_url::<EsoApiFeeds>(&self.game_config_url).await?;
         self.file_list_url = res.api_feeds.file_list;
         self.file_details_url = res.api_feeds.file_details;
@@ -71,17 +70,20 @@ impl ApiClient {
         Ok(())
     }
 
-    async fn req_url<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
+    async fn req_url<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, Box<dyn Error>> {
         println!("Requesting: {}", url);
         let res = self
             .client
             .get(url)
             .send()
             .await
-            .map_err(|err| Error::Other(Box::new(err)))?
+            .map_err(|err| Box::new(err))?
             .json::<T>()
             .await
-            .map_err(|err| Error::Other(Box::new(err)))?;
+            .map_err(|err| Box::new(err))?;
         Ok(res)
     }
 }
