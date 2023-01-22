@@ -23,6 +23,7 @@
 			// change this to your `beforeDevCommand`:
 			"command": "npm",
 			"args": [
+				"run",
 				"dev"
 			]
 		},

@@ -135,7 +135,7 @@ module.exports = {
       // default is `false`, which means no prefix
       prefix: false,
       // which flavour of colours to use by default, in the `:root`
-      defaultFlavour: 'latte'
+      defaultFlavour: 'mocha'
     }),
   ],
 }

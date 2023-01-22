@@ -14,7 +14,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Addon::Id).integer().not_null().primary_key())
                     .col(ColumnDef::new(Addon::CategoryId).string().not_null())
                     .col(ColumnDef::new(Addon::Version).string().not_null())
-                    .col(ColumnDef::new(Addon::Date).big_unsigned().not_null())
+                    .col(ColumnDef::new(Addon::Date).string().not_null())
                     .col(ColumnDef::new(Addon::Name).string().not_null())
                     .col(ColumnDef::new(Addon::AuthorName).string())
                     .col(ColumnDef::new(Addon::FileInfoUrl).string())
@@ -39,11 +39,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(InstalledAddon::Version).string().not_null())
-                    .col(
-                        ColumnDef::new(InstalledAddon::Date)
-                            .big_unsigned()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(InstalledAddon::Date).string().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("FK_installed_addon")

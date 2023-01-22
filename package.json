@@ -2,6 +2,7 @@
   "name": "eso-addon-manager",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,6 +15,7 @@
     "@catppuccin/tailwindcss": "^0.1.0",
     "@fortawesome/fontawesome-free": "^6.2.0",
     "@tailwindcss/forms": "^0.5.3",
+    "@tauri-apps/api": "^1.1.0",
     "next": "12.3.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",

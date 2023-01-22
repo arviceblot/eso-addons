@@ -16,9 +16,9 @@ extern crate walkdir;
 extern crate zip;
 
 pub mod addons;
+pub mod api;
 pub mod config;
-pub mod errors;
-pub mod htmlparser;
+pub mod error;
 pub mod service;
 
 pub fn get_missing_dependencies(installed: &Vec<Addon>) -> impl Iterator<Item = String> {

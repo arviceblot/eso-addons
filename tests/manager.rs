@@ -1,8 +1,8 @@
 extern crate tempfile;
 
-use std::error::Error;
+// use std::error::Error;
 
-use eso_addons_core::addons::Manager;
+// use eso_addons_core::addons::Manager;
 
 // #[test]
 // fn addon_manager_install_remove_addon() -> Result<(), Box<dyn Error>> {

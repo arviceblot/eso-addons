@@ -9,15 +9,23 @@ pub struct Model {
     pub id: i32,
     pub category_id: String,
     pub version: String,
-    pub date: i64,
+    pub date: String,
     pub name: String,
+    #[sea_orm(nullable)]
     pub author_name: Option<String>,
+    #[sea_orm(nullable)]
     pub file_info_url: Option<String>,
+    #[sea_orm(nullable)]
     pub download_total: Option<String>,
+    #[sea_orm(nullable)]
     pub download_monthly: Option<String>,
+    #[sea_orm(nullable)]
     pub favorite_total: Option<String>,
+    #[sea_orm(nullable)]
     pub md5: Option<String>,
+    #[sea_orm(nullable)]
     pub file_name: Option<String>,
+    #[sea_orm(nullable)]
     pub download: Option<String>,
 }
 

@@ -46,6 +46,85 @@
         "timestampUrl": ""
       }
     },
+    "cli": {
+      "description": "Cross-platform tool for managing addons for The Elder Scrolls Online",
+      "args": [
+        {
+          "name": "config",
+          "description": "Path to the JSON config file",
+          "short": "c",
+          "takesValue": true,
+          "required": false
+        }
+      ],
+      "subcommands": {
+        "add": {
+          "description": "Add a new addon",
+          "args": [
+            {
+              "name": "addon-id",
+              "description": "Numeric ID of the addon(s) to install (see search)",
+              "short": "i",
+              "takesValue": true,
+              "multiple": true,
+              "required": true
+            }
+          ]
+        },
+        "clean": {
+          "description": "Uninstall not managed addons",
+          "args": [
+            {
+              "name": "remove",
+              "description": "Remove the addons rather than just listing them",
+              "short": "r",
+              "takesValue": false
+            }
+          ]
+        },
+        "list": {
+          "description": "List status of addons"
+        },
+        "remove": {
+          "description": "Uninstall addon",
+          "args": [
+            {
+              "name": "addon-id",
+              "description": "Numeric ID of the addon(s) to remove (see list for installed IDs)",
+              "short": "i",
+              "takesValue": true,
+              "multiple": true,
+              "required": true
+            }
+          ]
+        },
+        "search": {
+          "description": "Search addons",
+          "args": [
+            {
+              "name": "search-string",
+              "description": "String to search addons for",
+              "short": "s",
+              "takesValue": true,
+              "required": true
+            }
+          ]
+        },
+        "update": {
+          "description": "Update addons",
+          "args": [
+            {
+              "name": "addon-id",
+              "description": "Numeric ID of the addon(s) to update (see list for installed IDs)",
+              "short": "i",
+              "takesValue": true,
+              "multiple": true,
+              "required": false
+            }
+          ]
+        }
+      }
+    },
     "security": {
       "csp": null
     },
@@ -55,10 +134,10 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 800,
         "resizable": true,
         "title": "ESO Addon Manager",
-        "width": 800
+        "width": 1280
       }
     ]
   }
