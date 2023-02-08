@@ -3,7 +3,7 @@ use std::fs::{self, File};
 
 use crate::addons::{get_root_dir, Addon, AddonList};
 use crate::api::ApiClient;
-use crate::config::{self, EAM_CONF, EAM_DATA_DIR, EAM_DB};
+use crate::config::{self, get_config_dir, EAM_CONF, EAM_DATA_DIR, EAM_DB};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_dir as AddonDir;
@@ -46,7 +46,7 @@ fn extract_dependency(dep: &str) -> Option<String> {
 impl AddonService {
     pub async fn new() -> AddonService {
         // setup config
-        let config_dir = dirs::config_dir().unwrap().join(EAM_DATA_DIR);
+        let config_dir = get_config_dir();
         if !config_dir.exists() {
             fs::create_dir_all(config_dir.to_owned()).unwrap();
         }

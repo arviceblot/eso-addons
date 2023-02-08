@@ -10,6 +10,7 @@ pub const EAM_CONF: &str = "config.json";
 pub const EAM_DB: &str = "addons.db";
 
 const STEAMDECK_DEFAULT_ADDON_DIR: &str = "/home/deck/.local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns";
+const STEAMDECK_DEFAULT_CONFIG_DIR: &str = "/home/deck/.config";
 const LINUX_DEFAULT_ADDON_DIR: &str =
     "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
 
@@ -82,6 +83,19 @@ fn create_initial_config(path: &Path) -> Result<()> {
     let config = get_initial_config();
     save_config(path, &config)?;
     Ok(())
+}
+
+fn is_steamdeck() -> bool {
+    let hostname = hostname::get().unwrap().into_string().unwrap();
+    matches!(hostname.as_str(), "steamdeck")
+}
+
+pub fn get_config_dir() -> PathBuf {
+    let base_path = match is_steamdeck() {
+        true => PathBuf::from(STEAMDECK_DEFAULT_CONFIG_DIR),
+        false => dirs::config_dir().unwrap(),
+    };
+    base_path.join(EAM_DATA_DIR)
 }
 
 #[cfg(target_os = "windows")]
