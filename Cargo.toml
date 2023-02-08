@@ -6,7 +6,7 @@
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-members = [".", "cli", "core", "entity", "migration", "src-tauri"]
+members = [".", "cli", "core", "entity", "migration", "ui-gtk4"]
 
 # [dependencies]
 # toml = "0.5"

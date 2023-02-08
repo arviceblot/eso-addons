@@ -1,0 +1,17 @@
+[package]
+name = "ui-gtk4"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+adw = { version = "0.2.1", package = "libadwaita" }
+gtk = { version = "0.5.5", package = "gtk4", features = ["v4_8"] }
+
+[build-dependencies]
+glib-build-tools = "0.16.3"
+
+[[bin]]
+name = "eso-addons-gtk"
+path = "src/main.rs"
