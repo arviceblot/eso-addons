@@ -61,7 +61,7 @@ impl ApiClient {
         Ok(res)
     }
 
-    pub async fn get_file_details(&self, id: u16) -> Result<FileDetails> {
+    pub async fn get_file_details(&self, id: i32) -> Result<FileDetails> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
         let res = self.req_url::<Vec<FileDetails>>(&req_url).await.unwrap();
         let res = res.first().cloned().unwrap();
@@ -97,7 +97,7 @@ impl ApiClient {
     }
 
     async fn req_url<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
-        println!("Requesting: {}", url);
+        println!("Requesting: {url}");
         let res = self
             .client
             .get(url)

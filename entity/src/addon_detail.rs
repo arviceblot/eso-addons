@@ -3,19 +3,19 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "installed_addon")]
+#[sea_orm(table_name = "addon_detail")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub addon_id: i32,
-    pub version: String,
-    pub date: String,
+    pub id: i32,
+    pub description: Option<String>,
+    pub change_log: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::addon::Entity",
-        from = "Column::AddonId",
+        from = "Column::Id",
         to = "super::addon::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"

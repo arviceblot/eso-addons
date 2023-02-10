@@ -29,7 +29,7 @@ pub fn get_download_url(addon_url: &str) -> Option<String> {
     for f in fns {
         let url = f(addon_url);
         if let Some(id) = url {
-            return Some(format!("https://www.esoui.com/downloads/download{}", id));
+            return Some(format!("https://www.esoui.com/downloads/download{id}"));
         }
     }
 
@@ -69,7 +69,7 @@ mod tests {
 
         for test in tests {
             let url = get_download_url(test.0);
-            assert!(url == test.1, "Got value: {:?}", url);
+            assert!(url == test.1, "Got value: {url:?}");
         }
     }
 }

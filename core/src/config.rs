@@ -122,7 +122,7 @@ fn get_initial_config() -> Config {
     };
 
     Config {
-        addon_dir: addon_dir,
+        addon_dir,
         addons: vec![],
         file_details: "".to_string(),
         file_list: "".to_string(),

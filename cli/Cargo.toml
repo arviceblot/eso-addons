@@ -15,7 +15,7 @@ dirs = "4.0"
 prettytable-rs = "^0.8"
 requestty = "0.3"
 colored = "2"
-sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros" ] }
+sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros", "debug-print" ] }
 futures = "0.3"
 eso-addons-core = { path = "../core" }
 migration = { path = "../migration" }

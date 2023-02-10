@@ -73,10 +73,10 @@ impl ObjectImpl for Window {
         new_action.connect_activate(move |_, _| {
             let imp = win.imp();
             let cur_view = imp.view_stack.visible_child_name().unwrap();
-            if cur_view == "installed" {
-                let view = win.installed_view();
-                view.present_creation_window();
-            }
+            // if cur_view == "installed" {
+            //     let view = win.installed_view();
+            //     view.present_creation_window();
+            // }
         });
 
         obj.add_action(&new_action);

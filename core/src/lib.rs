@@ -21,7 +21,7 @@ pub mod config;
 pub mod error;
 pub mod service;
 
-pub fn get_missing_dependencies(installed: &Vec<Addon>) -> impl Iterator<Item = String> {
+pub fn get_missing_dependencies(installed: &[Addon]) -> impl Iterator<Item = String> {
     let mut missing = HashSet::new();
 
     let mut addon_map = HashSet::new();
@@ -40,7 +40,7 @@ pub fn get_missing_dependencies(installed: &Vec<Addon>) -> impl Iterator<Item = 
     missing.into_iter()
 }
 
-pub fn get_unmanaged_addons<'a, I>(desired: &Vec<AddonEntry>, installed: I) -> Vec<&'a Addon>
+pub fn get_unmanaged_addons<'a, I>(desired: &[AddonEntry], installed: I) -> Vec<&'a Addon>
 where
     I: Iterator<Item = &'a Addon>,
 {
@@ -60,7 +60,7 @@ where
     result
 }
 
-pub fn get_unused_dependencies(installed: &Vec<Addon>, desired: &Vec<AddonEntry>) -> Vec<String> {
+pub fn get_unused_dependencies(installed: &[Addon], desired: &[AddonEntry]) -> Vec<String> {
     let mut dep_graph: HashMap<String, HashSet<String>> = HashMap::new();
 
     for addon in installed.iter() {
@@ -85,8 +85,8 @@ pub fn get_unused_dependencies(installed: &Vec<Addon>, desired: &Vec<AddonEntry>
     let mut unused_addons = vec![];
 
     for (addon, dependency_for) in dep_graph.iter() {
-        if dependency_for.len() == 0 {
-            let addon_config = desired.iter().find(|x| x.name == addon.to_owned());
+        if dependency_for.is_empty() {
+            let addon_config = desired.iter().find(|x| x.name == *addon);
             let unused = addon_config.map(|x| x.dependency).unwrap_or(true);
 
             if unused {

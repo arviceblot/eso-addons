@@ -27,7 +27,7 @@ struct Opts {
 }
 
 #[derive(Parser)]
-pub struct AddCommand {
+struct AddCommand {
     addon_id: i32,
 }
 
@@ -52,7 +52,7 @@ impl AddCommand {
 }
 
 #[derive(Parser)]
-pub struct UpdateCommand {}
+struct UpdateCommand {}
 
 impl UpdateCommand {
     pub async fn run(&self, service: &mut AddonService) -> Result<()> {
@@ -62,7 +62,7 @@ impl UpdateCommand {
 }
 
 #[derive(Parser)]
-pub struct RemoveCommand {
+struct RemoveCommand {
     addon_id: i32,
 }
 
@@ -75,20 +75,23 @@ impl RemoveCommand {
 }
 
 #[derive(Parser)]
-pub struct SearchCommand {
+struct SearchCommand {
     search_string: String,
 }
 
 impl SearchCommand {
     pub async fn run(&self, service: &AddonService) -> Result<()> {
         let results = service.search(&self.search_string).await?;
+        if results.is_empty() {
+            println!("No results for \"{}\"", self.search_string);
+            return Ok(());
+        }
         for addon in results.iter() {
-            print!("{:>4} {}", addon.id, addon.name);
+            let mut output = format!("{:>4} {}", addon.id, addon.name);
             if addon.installed {
-                println!(" {}", "(installed)".green().bold());
-            } else {
-                println!();
+                output.push_str(&format!(" {}", "(installed)".green().bold()));
             }
+            println!("{output}");
         }
         Ok(())
     }

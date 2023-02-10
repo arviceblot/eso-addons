@@ -1,4 +1,4 @@
-use snafu::Snafu;
+use snafu::{Backtrace, Snafu};
 use std::{io, path::PathBuf};
 
 #[derive(Debug, Snafu)]
@@ -32,7 +32,10 @@ pub enum Error {
     DbGet { source: sea_orm::DbErr },
 
     #[snafu(display("DbPut error: {}", source))]
-    DbPut { source: sea_orm::DbErr },
+    DbPut {
+        source: sea_orm::DbErr,
+        backtrace: Backtrace,
+    },
 
     #[snafu(display("DbDelete error: {}", source))]
     DbDelete { source: sea_orm::DbErr },

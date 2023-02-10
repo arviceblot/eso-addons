@@ -111,6 +111,9 @@ impl MigrationTrait for Migration {
             .drop_table(Table::drop().table(AddonDir::Table).to_owned())
             .await?;
         manager
+            .drop_table(Table::drop().table(AddonDependency::Table).to_owned())
+            .await?;
+        manager
             .drop_table(Table::drop().table(Addon::Table).to_owned())
             .await
     }
@@ -118,7 +121,7 @@ impl MigrationTrait for Migration {
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum Addon {
+pub enum Addon {
     Table,
     Id,
     CategoryId,

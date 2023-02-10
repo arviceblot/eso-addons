@@ -3,19 +3,20 @@ use std::fs::{self, File};
 
 use crate::addons::{get_root_dir, Addon, AddonList};
 use crate::api::ApiClient;
-use crate::config::{self, get_config_dir, EAM_CONF, EAM_DATA_DIR, EAM_DB};
+use crate::config::{self, get_config_dir, EAM_CONF, EAM_DB};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_dir as AddonDir;
+use entity::category as Category;
 use entity::installed_addon as InstalledAddon;
 use migration::{Migrator, MigratorTrait};
 use regex::Regex;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::Statement;
 use sea_orm::{ActiveValue, DatabaseBackend};
 use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use sea_orm::{FromQueryResult, ModelTrait};
+use sea_orm::{QueryOrder, Statement};
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::io::{self, BufRead, BufReader, Seek, Write};
@@ -48,7 +49,7 @@ impl AddonService {
         // setup config
         let config_dir = get_config_dir();
         if !config_dir.exists() {
-            fs::create_dir_all(config_dir.to_owned()).unwrap();
+            fs::create_dir_all(&config_dir).unwrap();
         }
         let config_filepath = config_dir.join(EAM_CONF);
         let config = config::parse_config(&config_filepath).unwrap();
@@ -60,7 +61,7 @@ impl AddonService {
         // create db file if not exists
         let db_file = config_dir.join(EAM_DB);
         if !db_file.exists() {
-            File::create(db_file.to_owned()).unwrap();
+            File::create(&db_file).unwrap();
         }
         // setup database connection and apply migrations if needed
         let database_url = format!("sqlite://{}", db_file.to_string_lossy());
@@ -90,17 +91,14 @@ impl AddonService {
             .get_file_details(addon_id.try_into().unwrap())
             .await?;
 
-        match installed_entry {
-            Some(installed_entry) => {
-                if installed_entry.date == file_details.date.to_string() && !update {
-                    println!(
-                        "Addon {} is already installed and up to date",
-                        entry.name.unwrap()
-                    );
-                    return Ok(());
-                }
+        if let Some(installed_entry) = installed_entry {
+            if installed_entry.date == file_details.date.to_string() && !update {
+                println!(
+                    "Addon {} is already installed and up to date",
+                    entry.name.unwrap()
+                );
+                return Ok(());
             }
-            None => (),
         }
 
         entry.download = ActiveValue::Set(Some(file_details.download_url.to_owned()));
@@ -131,7 +129,7 @@ impl AddonService {
             .context(error::DbPutSnafu)?;
 
         // get addon IDs from dependency dirs, there may be more than on for each directory
-        if installed.depends_on.len() > 0 {
+        if !installed.depends_on.is_empty() {
             let deps = installed.depends_on.iter().map(|x| AddonDep::ActiveModel {
                 addon_id: ActiveValue::Set(addon_id),
                 dependency_dir: ActiveValue::Set(x.to_owned()),
@@ -156,6 +154,11 @@ impl AddonService {
     pub async fn update(&mut self) -> Result<()> {
         // update endpoints from api
         self.api.update_endpoints().await.unwrap();
+
+        // update categories
+        self.update_categories().await?;
+
+        // update addons
         let file_list = self.api.get_file_list().await.unwrap();
 
         let mut insert_addons = vec![];
@@ -237,7 +240,7 @@ impl AddonService {
         for update in updates.iter() {
             self.install(update.addon_id, true).await.unwrap();
         }
-        if updates.len() == 0 {
+        if updates.is_empty() {
             println!("Everything up to date!");
         }
 
@@ -250,6 +253,34 @@ impl AddonService {
 
         config::save_config(&self.config_filepath, &self.config).unwrap();
 
+        Ok(())
+    }
+
+    async fn update_categories(&self) -> Result<()> {
+        let categories = self.api.get_categories().await?;
+        let mut insert_categories = vec![];
+        for category in categories.iter() {
+            let db_category = Category::ActiveModel {
+                id: ActiveValue::Set(category.id.parse().unwrap()),
+                title: ActiveValue::Set(category.title.to_owned()),
+                icon: ActiveValue::Set(Some(category.icon.to_owned())),
+                file_count: ActiveValue::Set(Some(category.file_count.parse().unwrap())),
+            };
+            insert_categories.push(db_category);
+        }
+        Category::Entity::insert_many(insert_categories)
+            .on_conflict(
+                OnConflict::column(Category::Column::Id)
+                    .update_columns([
+                        Category::Column::Title,
+                        Category::Column::Icon,
+                        Category::Column::FileCount,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
         Ok(())
     }
 
@@ -293,12 +324,7 @@ impl AddonService {
             .await
             .context(error::DbDeleteSnafu)?;
         // delete installed addon directories
-        let addon_path = self.get_addon_dir().to_owned();
-        for dir in installed_dirs.iter() {
-            let full_path = Path::new(&addon_path).join(dir.dir.to_string());
-            fs::remove_dir_all(full_path.to_owned())
-                .context(error::AddonDeleteSnafu { dir: full_path })?;
-        }
+        self.fs_delete_addon(&installed_dirs).unwrap();
 
         Ok(())
     }
@@ -306,7 +332,8 @@ impl AddonService {
     pub async fn search(&self, search_string: &String) -> Result<Vec<SearchDbAddon>> {
         let mut results = vec![];
         let addons = DbAddon::Entity::find()
-            .filter(DbAddon::Column::Name.like(format!("%{}%", search_string).as_str()))
+            .filter(DbAddon::Column::Name.like(format!("%{search_string}%").as_str()))
+            .order_by_desc(DbAddon::Column::Date)
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
@@ -317,12 +344,8 @@ impl AddonService {
                 .await
                 .context(error::DbGetSnafu)?;
             let mut search_addon: SearchDbAddon = addon.into();
-            if installed.len() > 0 {
-                // println!(" {}", "(installed)".green().bold());
+            if !installed.is_empty() {
                 search_addon.installed = true;
-                println!();
-            } else {
-                println!();
             }
             results.push(search_addon);
         }
@@ -379,7 +402,7 @@ impl AddonService {
             .context(error::DbGetSnafu)
             .unwrap();
 
-        if need_installs.len() > 0 {
+        if !need_installs.is_empty() {
             println!("Missing dependencies! Founds some options:");
             for need_install in need_installs.iter() {
                 println!(
@@ -392,7 +415,10 @@ impl AddonService {
         need_installs
     }
 
-    pub fn get_addon_details(&self, addon_id: i32) -> Result<()> {
+    pub async fn get_addon_details(&self, addon_id: i32) -> Result<()> {
+        // first, update the details from API
+        let details = self.api.get_file_details(addon_id).await?;
+        // now update the db record
         Ok(())
     }
 
@@ -416,7 +442,7 @@ impl AddonService {
             let file_path = entry_dir.path();
 
             let file_name = entry_dir.file_name();
-            let parent_dir_name = file_path.parent().map(|f| f.file_name()).flatten();
+            let parent_dir_name = file_path.parent().and_then(|f| f.file_name());
 
             match parent_dir_name {
                 None => continue,
@@ -433,7 +459,7 @@ impl AddonService {
 
             match self.fs_read_addon(addon_dir) {
                 Ok(addon) => addon_list.addons.push(addon),
-                Err(err) => println!("{}", err), //addon_list.errors.push(err),
+                Err(err) => println!("{err}"), //addon_list.errors.push(err),
             }
         }
 
@@ -464,10 +490,10 @@ impl AddonService {
                     if line.starts_with("## DependsOn:") {
                         let depends_on = match re.captures(&line) {
                             Some(ref captures) => captures[2]
-                                .split(" ")
+                                .split(' ')
                                 .map(|s| s.to_owned())
                                 .into_iter()
-                                .filter_map(|s| extract_dependency(&s).to_owned())
+                                .filter_map(|s| extract_dependency(&s))
                                 .collect(),
                             None => vec![],
                         };
@@ -475,19 +501,19 @@ impl AddonService {
                         addon.depends_on = depends_on;
                     }
                 }
-                _ => {}
+                Err(_) => todo!(),
             }
         }
 
         Ok(addon)
     }
 
-    fn fs_delete_addon(&self, addon: &Addon) -> Result<()> {
-        let mut addon_path = self.get_addon_dir().to_owned();
-        addon_path.push(&addon.name);
-
-        fs::remove_dir_all(addon_path.to_owned())
-            .context(error::AddonDeleteSnafu { dir: addon_path })?;
+    fn fs_delete_addon(&self, addon_dirs: &[AddonDir::Model]) -> Result<()> {
+        let addon_path = self.get_addon_dir();
+        for dir in addon_dirs.iter() {
+            let full_path = Path::new(&addon_path).join(&dir.dir);
+            fs::remove_dir_all(&full_path).context(error::AddonDeleteSnafu { dir: full_path })?;
+        }
         Ok(())
     }
 
@@ -508,7 +534,7 @@ impl AddonService {
             .reopen()
             .context(error::AddonDownloadTmpFileReadSnafu)?;
         tmpfile
-            .write_all(&mut response.as_ref())
+            .write_all(response.as_ref())
             .context(error::AddonDownloadTmpFileWriteSnafu)?;
         r_tmpfile.rewind().unwrap();
 
@@ -535,7 +561,7 @@ impl AddonService {
             } else {
                 if let Some(p) = outpath.parent() {
                     if !p.exists() {
-                        fs::create_dir_all(&p)
+                        fs::create_dir_all(p)
                             .context(error::AddonDownloadZipExtractSnafu { path: p })?;
                     }
                 }
@@ -548,10 +574,10 @@ impl AddonService {
             }
         }
 
-        let mut addon_path = self.get_addon_dir().to_owned();
+        let mut addon_path = self.get_addon_dir();
         let addon_name = archive
             .by_index(0)
-            .context(error::AddonDownloadZipReadSnafu { file: 0 as usize })?;
+            .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
         let addon_name = get_root_dir(&addon_name.mangled_name());
         addon_path.push(addon_name);
 
@@ -564,7 +590,7 @@ impl AddonService {
         let mut filepath = path.to_owned();
         let mut filepath_lowercase = path.to_owned();
 
-        let filename = PathBuf::from(format!("{}.txt", addon_name));
+        let filename = PathBuf::from(format!("{addon_name}.txt"));
         let filename_lowercase = PathBuf::from(format!("{}.txt", addon_name.to_lowercase()));
 
         filepath.push(filename);
@@ -599,4 +625,12 @@ impl From<&DbAddon::Model> for SearchDbAddon {
             installed: false,
         }
     }
+}
+
+pub struct AddonDetails {
+    pub id: i32,
+    pub category_id: String,
+    pub version: String,
+    pub name: String,
+    pub installed: bool,
 }

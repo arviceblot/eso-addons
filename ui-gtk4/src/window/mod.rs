@@ -31,13 +31,13 @@ impl Window {
         self.imp().view_stack.get()
     }
 
-    pub fn installed_view(&self) -> InstalledView {
-        self.view_stack()
-            .child_by_name("snapshot")
-            .unwrap()
-            .downcast()
-            .unwrap()
-    }
+    // pub fn installed_view(&self) -> InstalledView {
+    //     self.view_stack()
+    //         .child_by_name("snapshot")
+    //         .unwrap()
+    //         .downcast()
+    //         .unwrap()
+    // }
 
     pub fn switcher_bar(&self) -> adw::ViewSwitcherBar {
         self.imp().switcher_bar.get()
