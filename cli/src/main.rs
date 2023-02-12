@@ -6,6 +6,7 @@ extern crate prettytable;
 use crate::show::ShowCommand;
 use clap::Parser;
 use colored::*;
+use dotenv::dotenv;
 use eso_addons_core::error::Result;
 use eso_addons_core::service::AddonService;
 
@@ -56,7 +57,26 @@ struct UpdateCommand {}
 
 impl UpdateCommand {
     pub async fn run(&self, service: &mut AddonService) -> Result<()> {
-        service.update().await?;
+        let result = service.update().await?;
+
+        if result.addons_updated.is_empty() {
+            println!("Everything up to date!");
+        } else {
+            for addon in result.addons_updated.iter() {
+                println!("{} Updated {}!", "✔".green(), addon.addon_id);
+            }
+        }
+
+        if !result.missing_deps.is_empty() {
+            println!("Missing dependencies! Founds some options:");
+            for need_install in result.missing_deps.iter() {
+                println!(
+                    "{} - {} ({})",
+                    need_install.dir, need_install.name, need_install.id
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -117,7 +137,15 @@ enum SubCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenv().ok();
+
     let opts: Opts = Opts::parse();
+
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_test_writer()
+        .init();
+
     let mut service = AddonService::new().await;
 
     match opts.subcmd {

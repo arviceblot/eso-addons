@@ -21,3 +21,6 @@ eso-addons-core = { path = "../core" }
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3.16"
+tracing = "0.1.37"
+dotenv = "0.15.0"

@@ -27,3 +27,4 @@ sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", 
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 chrono = "0.4.23"
+tracing = "0.1.37"

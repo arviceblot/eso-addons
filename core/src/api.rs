@@ -5,6 +5,7 @@ use snafu::ResultExt;
 extern crate chrono;
 
 use chrono::prelude::*;
+use tracing::info;
 
 use crate::error::{self, Result};
 
@@ -97,7 +98,7 @@ impl ApiClient {
     }
 
     async fn req_url<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
-        println!("Requesting: {url}");
+        info!("Requesting: {url}");
         let res = self
             .client
             .get(url)
