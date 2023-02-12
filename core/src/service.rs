@@ -9,14 +9,16 @@ use entity::addon_dependency as AddonDep;
 use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::installed_addon as InstalledAddon;
-use migration::{Migrator, MigratorTrait};
+use migration::{Condition, Migrator, MigratorTrait};
 use regex::Regex;
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue, DatabaseBackend};
+use sea_orm::sea_query::Query;
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::QueryOrder;
+use sea_orm::{ActiveValue, QuerySelect};
 use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use sea_orm::{FromQueryResult, ModelTrait};
-use sea_orm::{QueryOrder, Statement};
+use sea_orm::{JoinType, RelationTrait};
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::io::{self, BufRead, BufReader, Seek, Write};
@@ -26,9 +28,9 @@ use walkdir::WalkDir;
 
 #[derive(FromQueryResult)]
 pub struct AddonDepOption {
-    id: i32,
-    name: String,
-    dir: String,
+    pub id: i32,
+    pub name: String,
+    pub dir: String,
 }
 
 #[derive(Debug)]
@@ -86,10 +88,7 @@ impl AddonService {
             .one(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        let file_details = self
-            .api
-            .get_file_details(addon_id.try_into().unwrap())
-            .await?;
+        let file_details = self.api.get_file_details(addon_id).await?;
 
         if let Some(installed_entry) = installed_entry {
             if installed_entry.date == file_details.date.to_string() && !update {
@@ -151,7 +150,7 @@ impl AddonService {
         Ok(())
     }
 
-    pub async fn update(&mut self) -> Result<()> {
+    pub async fn update(&mut self) -> Result<UpdateResult> {
         // update endpoints from api
         self.api.update_endpoints().await.unwrap();
 
@@ -222,29 +221,20 @@ impl AddonService {
             .context(error::DbPutSnafu)?;
 
         // update all addons that have a newer date than installed date
-        // TODO: maybe rewrite this using query builder
         let updates = InstalledAddon::Entity::find()
-            .from_raw_sql(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                r#"SELECT
-                i.*
-            FROM installed_addon i
-            inner join addon a on i.addon_id  = a.id
-            where i.date < a.date"#
-                    .to_string(),
-            ))
-            .into_model::<InstalledAddon::Model>()
+            .inner_join(DbAddon::Entity)
+            .filter(
+                Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
+                    .less_than(Expr::tbl(DbAddon::Entity, DbAddon::Column::Date)),
+            )
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
         for update in updates.iter() {
             self.install(update.addon_id, true).await.unwrap();
         }
-        if updates.is_empty() {
-            println!("Everything up to date!");
-        }
 
-        let _need_installs = self.get_missing_dependency_options().await;
+        let need_installs = self.get_missing_dependency_options().await;
 
         self.config.file_details = self.api.file_details_url.to_owned();
         self.config.file_list = self.api.file_list_url.to_owned();
@@ -253,7 +243,10 @@ impl AddonService {
 
         config::save_config(&self.config_filepath, &self.config).unwrap();
 
-        Ok(())
+        Ok(UpdateResult {
+            addons_updated: updates,
+            missing_deps: need_installs,
+        })
     }
 
     async fn update_categories(&self) -> Result<()> {
@@ -332,19 +325,15 @@ impl AddonService {
     pub async fn search(&self, search_string: &String) -> Result<Vec<SearchDbAddon>> {
         let mut results = vec![];
         let addons = DbAddon::Entity::find()
+            .find_also_related(InstalledAddon::Entity)
             .filter(DbAddon::Column::Name.like(format!("%{search_string}%").as_str()))
             .order_by_desc(DbAddon::Column::Date)
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        for addon in addons.iter() {
-            let installed = addon
-                .find_related(InstalledAddon::Entity)
-                .all(&self.db)
-                .await
-                .context(error::DbGetSnafu)?;
+        for (addon, installed) in addons.iter() {
             let mut search_addon: SearchDbAddon = addon.into();
-            if !installed.is_empty() {
+            if installed.is_some() {
                 search_addon.installed = true;
             }
             results.push(search_addon);
@@ -376,41 +365,40 @@ impl AddonService {
     }
 
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
-        // TODO: maybe rewrite this using query builder
-        let need_installs = AddonDep::Entity::find()
-            .from_raw_sql(Statement::from_string(
-                DatabaseBackend::Sqlite,
-                r#"SELECT
-            a.id,
-            a.name,
-            adr.dir
-        from addon_dependency ad
-        inner join addon_dir adr on ad.dependency_dir = adr.dir
-        inner join addon a on adr.addon_id = a.id
-        where adr.dir not in (
-            select
-                DISTINCT dir
-            from addon_dir adr
-            inner join installed_addon i on adr.addon_id = i.addon_id
-        )
-        order by adr.dir"#
-                    .to_string(),
-            ))
+        let need_installs = InstalledAddon::Entity::find()
+            .columns([DbAddon::Column::Id, DbAddon::Column::Name])
+            .column(AddonDir::Column::Dir)
+            .join(JoinType::InnerJoin, InstalledAddon::Relation::Addon.def())
+            .join(JoinType::InnerJoin, DbAddon::Relation::AddonDir.def())
+            .join(
+                JoinType::InnerJoin,
+                DbAddon::Relation::AddonDependency.def(),
+            )
+            // ^^^ might have to replace with manual join, as the relation is set up in the other direction
+            .filter(
+                Condition::any().add(
+                    AddonDir::Column::Dir.not_in_subquery(
+                        Query::select()
+                            .column(AddonDir::Column::Dir)
+                            .distinct()
+                            .from(AddonDir::Entity)
+                            .inner_join(
+                                InstalledAddon::Entity,
+                                Expr::tbl(AddonDir::Entity, AddonDir::Column::AddonId).equals(
+                                    InstalledAddon::Entity,
+                                    InstalledAddon::Column::AddonId,
+                                ),
+                            )
+                            .to_owned(),
+                    ),
+                ),
+            )
+            .order_by_asc(AddonDir::Column::Dir)
             .into_model::<AddonDepOption>()
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)
             .unwrap();
-
-        if !need_installs.is_empty() {
-            println!("Missing dependencies! Founds some options:");
-            for need_install in need_installs.iter() {
-                println!(
-                    "{} - {} ({})",
-                    need_install.dir, need_install.name, need_install.id
-                );
-            }
-        }
 
         need_installs
     }
@@ -483,25 +471,20 @@ impl AddonService {
             depends_on: vec![],
         };
 
-        let lines = BufReader::new(file).lines();
-        for line in lines {
-            match line {
-                Ok(line) => {
-                    if line.starts_with("## DependsOn:") {
-                        let depends_on = match re.captures(&line) {
-                            Some(ref captures) => captures[2]
-                                .split(' ')
-                                .map(|s| s.to_owned())
-                                .into_iter()
-                                .filter_map(|s| extract_dependency(&s))
-                                .collect(),
-                            None => vec![],
-                        };
+        let reader = BufReader::new(file);
+        for line in reader.lines().flatten() {
+            if line.starts_with("## DependsOn:") {
+                let depends_on = match re.captures(&line) {
+                    Some(ref captures) => captures[2]
+                        .split(' ')
+                        .map(|s| s.to_owned())
+                        .into_iter()
+                        .filter_map(|s| extract_dependency(&s))
+                        .collect(),
+                    None => vec![],
+                };
 
-                        addon.depends_on = depends_on;
-                    }
-                }
-                Err(_) => todo!(),
+                addon.depends_on = depends_on;
             }
         }
 
@@ -633,4 +616,9 @@ pub struct AddonDetails {
     pub version: String,
     pub name: String,
     pub installed: bool,
+}
+
+pub struct UpdateResult {
+    pub addons_updated: Vec<InstalledAddon::Model>,
+    pub missing_deps: Vec<AddonDepOption>,
 }
