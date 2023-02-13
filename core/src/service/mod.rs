@@ -1,7 +1,7 @@
 use crate::error::{self, Result};
 use std::fs::{self, File};
 
-use crate::addons::{get_root_dir, Addon, AddonList};
+use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
 use crate::config::{self, get_config_dir, EAM_CONF, EAM_DB};
 use entity::addon as DbAddon;
@@ -10,28 +10,21 @@ use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::installed_addon as InstalledAddon;
 use migration::{Condition, Migrator, MigratorTrait};
-use regex::Regex;
-use sea_orm::sea_query::Query;
-use sea_orm::sea_query::{Expr, OnConflict};
-use sea_orm::QueryOrder;
-use sea_orm::{ActiveValue, QuerySelect};
-use sea_orm::{ColumnTrait, DatabaseConnection, QueryFilter};
-use sea_orm::{EntityTrait, PaginatorTrait};
-use sea_orm::{FromQueryResult, ModelTrait};
-use sea_orm::{JoinType, RelationTrait};
-use serde_derive::{Deserialize, Serialize};
+use sea_orm::sea_query::{Expr, OnConflict, Query};
+use sea_orm::{
+    ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, JoinType, ModelTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
+};
 use snafu::ResultExt;
-use std::io::{self, BufRead, BufReader, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, Seek, Write};
+use std::path::PathBuf;
 use tempfile::NamedTempFile;
-use walkdir::WalkDir;
 
-#[derive(FromQueryResult)]
-pub struct AddonDepOption {
-    pub id: i32,
-    pub name: String,
-    pub dir: String,
-}
+use self::fs_util::{fs_delete_addon, fs_get_addons, fs_read_addon};
+use self::result::*;
+
+mod fs_util;
+mod result;
 
 #[derive(Debug)]
 pub struct AddonService {
@@ -40,12 +33,6 @@ pub struct AddonService {
     config_filepath: PathBuf,
     pub db: DatabaseConnection,
 }
-
-fn extract_dependency(dep: &str) -> Option<String> {
-    let re = Regex::new(r"^(.+?)(([<=>]+)(.*))?$").unwrap();
-    re.captures(dep).map(|captures| captures[1].to_owned())
-}
-
 impl AddonService {
     pub async fn new() -> AddonService {
         // setup config
@@ -222,16 +209,18 @@ impl AddonService {
 
         // update all addons that have a newer date than installed date
         let updates = InstalledAddon::Entity::find()
+            .column(DbAddon::Column::Name)
             .inner_join(DbAddon::Entity)
             .filter(
                 Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
                     .less_than(Expr::tbl(DbAddon::Entity, DbAddon::Column::Date)),
             )
+            .into_model::<AddonDetails>()
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
         for update in updates.iter() {
-            self.install(update.addon_id, true).await.unwrap();
+            self.install(update.id, true).await.unwrap();
         }
 
         let need_installs = self.get_missing_dependency_options().await;
@@ -317,7 +306,7 @@ impl AddonService {
             .await
             .context(error::DbDeleteSnafu)?;
         // delete installed addon directories
-        self.fs_delete_addon(&installed_dirs).unwrap();
+        fs_delete_addon(&self.get_addon_dir(), &installed_dirs).unwrap();
 
         Ok(())
     }
@@ -403,101 +392,15 @@ impl AddonService {
         need_installs
     }
 
-    pub async fn get_addon_details(&self, addon_id: i32) -> Result<()> {
+    pub async fn get_addon_details(&self, addon_id: i32) -> Result<Vec<AddonDetails>> {
         // first, update the details from API
         let details = self.api.get_file_details(addon_id).await?;
         // now update the db record
-        Ok(())
+        Ok(vec![])
     }
 
     fn get_addon_dir(&self) -> PathBuf {
         self.config.addon_dir.clone()
-    }
-
-    fn fs_get_addons(&self) -> Result<AddonList> {
-        let mut addon_list = AddonList {
-            addons: vec![],
-            errors: vec![],
-        };
-        let addon_dir = self.get_addon_dir();
-
-        // Ok(fs::metadata(addon_dir));
-
-        fs::metadata(&addon_dir).context(error::AddonDirMetadataSnafu { dir: &addon_dir })?;
-
-        for entry in WalkDir::new(addon_dir) {
-            let entry_dir = entry.unwrap();
-            let file_path = entry_dir.path();
-
-            let file_name = entry_dir.file_name();
-            let parent_dir_name = file_path.parent().and_then(|f| f.file_name());
-
-            match parent_dir_name {
-                None => continue,
-                Some(parent_dir_name) => {
-                    let mut name = parent_dir_name.to_os_string();
-                    name.push(".txt");
-                    if name != file_name {
-                        continue;
-                    }
-                }
-            }
-
-            let addon_dir = file_path.parent().unwrap();
-
-            match self.fs_read_addon(addon_dir) {
-                Ok(addon) => addon_list.addons.push(addon),
-                Err(err) => println!("{err}"), //addon_list.errors.push(err),
-            }
-        }
-
-        Ok(addon_list)
-    }
-
-    pub fn fs_get_addon(&self, name: &str) -> Result<Option<Addon>> {
-        let addon_list = self.fs_get_addons()?;
-        let found = addon_list.addons.into_iter().find(|x| x.name == name);
-        Ok(found)
-    }
-
-    fn fs_read_addon(&self, path: &Path) -> Result<Addon> {
-        let addon_name = path.file_name().unwrap().to_str().unwrap();
-
-        let file = self.fs_open_addon_metadata_file(path, addon_name)?;
-        let re = Regex::new(r"## (.*): (.*)").unwrap();
-
-        let mut addon = Addon {
-            name: addon_name.to_owned(),
-            depends_on: vec![],
-        };
-
-        let reader = BufReader::new(file);
-        for line in reader.lines().flatten() {
-            if line.starts_with("## DependsOn:") {
-                let depends_on = match re.captures(&line) {
-                    Some(ref captures) => captures[2]
-                        .split(' ')
-                        .map(|s| s.to_owned())
-                        .into_iter()
-                        .filter_map(|s| extract_dependency(&s))
-                        .collect(),
-                    None => vec![],
-                };
-
-                addon.depends_on = depends_on;
-            }
-        }
-
-        Ok(addon)
-    }
-
-    fn fs_delete_addon(&self, addon_dirs: &[AddonDir::Model]) -> Result<()> {
-        let addon_path = self.get_addon_dir();
-        for dir in addon_dirs.iter() {
-            let full_path = Path::new(&addon_path).join(&dir.dir);
-            fs::remove_dir_all(&full_path).context(error::AddonDeleteSnafu { dir: full_path })?;
-        }
-        Ok(())
     }
 
     pub async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
@@ -564,61 +467,8 @@ impl AddonService {
         let addon_name = get_root_dir(&addon_name.mangled_name());
         addon_path.push(addon_name);
 
-        let addon = self.fs_read_addon(&addon_path);
+        let addon = fs_read_addon(&addon_path);
 
         Ok(addon.unwrap())
     }
-
-    fn fs_open_addon_metadata_file(&self, path: &Path, addon_name: &str) -> Result<File> {
-        let mut filepath = path.to_owned();
-        let mut filepath_lowercase = path.to_owned();
-
-        let filename = PathBuf::from(format!("{addon_name}.txt"));
-        let filename_lowercase = PathBuf::from(format!("{}.txt", addon_name.to_lowercase()));
-
-        filepath.push(filename);
-        filepath_lowercase.push(filename_lowercase);
-
-        if filepath.exists() {
-            Ok(File::open(&filepath).context(error::AddonMetadataFileSnafu { path: filepath })?)
-        } else if filepath_lowercase.exists() {
-            Ok(File::open(&filepath_lowercase)
-                .context(error::AddonMetadataFileSnafu { path: filepath })?)
-        } else {
-            error::AddonMetadataFileMissingSnafu { addon: addon_name }.fail()
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SearchDbAddon {
-    pub id: i32,
-    pub category_id: String,
-    pub version: String,
-    pub name: String,
-    pub installed: bool,
-}
-impl From<&DbAddon::Model> for SearchDbAddon {
-    fn from(a: &DbAddon::Model) -> Self {
-        Self {
-            id: a.id,
-            category_id: a.category_id.to_string(),
-            version: a.version.to_string(),
-            name: a.name.to_string(),
-            installed: false,
-        }
-    }
-}
-
-pub struct AddonDetails {
-    pub id: i32,
-    pub category_id: String,
-    pub version: String,
-    pub name: String,
-    pub installed: bool,
-}
-
-pub struct UpdateResult {
-    pub addons_updated: Vec<InstalledAddon::Model>,
-    pub missing_deps: Vec<AddonDepOption>,
 }

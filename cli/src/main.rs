@@ -63,7 +63,7 @@ impl UpdateCommand {
             println!("Everything up to date!");
         } else {
             for addon in result.addons_updated.iter() {
-                println!("{} Updated {}!", "✔".green(), addon.addon_id);
+                println!("{} Updated {}!", "✔".green(), addon.name);
             }
         }
 
@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     let opts: Opts = Opts::parse();
 
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::WARN)
         .with_test_writer()
         .init();
 

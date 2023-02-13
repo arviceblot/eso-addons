@@ -6,6 +6,8 @@
     <child>
       <object class="GtkBox">
         <property name="orientation">vertical</property>
+
+        <!-- Header bar -->
         <child>
           <object class="AdwHeaderBar" id="header_bar">
             <property name="centering_policy">strict</property>
@@ -61,11 +63,15 @@
             </section>
           </menu>
         </child>
+
+        <!-- Window content -->
         <child>
           <object class="AdwViewStack" id="view_stack">
             <property name="vexpand">True</property>
           </object>
         </child>
+
+        <!-- Bottom tab bar -->
         <child>
           <object class="AdwViewSwitcherBar" id="switcher_bar">
             <property name="stack">view_stack</property>
