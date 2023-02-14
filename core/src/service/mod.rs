@@ -209,7 +209,12 @@ impl AddonService {
 
         // update all addons that have a newer date than installed date
         let updates = InstalledAddon::Entity::find()
-            .column(DbAddon::Column::Name)
+            .columns([
+                DbAddon::Column::Id,
+                DbAddon::Column::CategoryId,
+                DbAddon::Column::Name,
+            ])
+            .column_as(Expr::value(1), "installed")
             .inner_join(DbAddon::Entity)
             .filter(
                 Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
