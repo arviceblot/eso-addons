@@ -7,6 +7,7 @@ extern crate chrono;
 use chrono::prelude::*;
 use tracing::info;
 
+use crate::config::Config;
 use crate::error::{self, Result};
 
 const GLOBAL_CONFIG: &str = "globalconfig.json";
@@ -52,6 +53,13 @@ impl ApiClient {
         // update game endpoints
         self.get_game_config().await?;
         Ok(())
+    }
+
+    pub fn update_endpoints_from_config(&mut self, config: &Config) {
+        self.file_list_url = config.file_list.to_owned();
+        self.file_details_url = config.file_details.to_owned();
+        self.list_files_url = config.list_files.to_owned();
+        self.category_list_url = config.category_list.to_owned();
     }
 
     pub async fn get_file_list(&mut self) -> Result<Vec<FileListItem>> {

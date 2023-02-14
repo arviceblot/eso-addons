@@ -39,6 +39,19 @@ pub struct AddonDetails {
     pub installed: bool,
 }
 
+#[derive(FromQueryResult)]
+pub struct AddonShowDetails {
+    pub id: i32,
+    pub name: String,
+    pub author_name: String,
+    pub category: String,
+    pub version: String,
+    pub date: String,
+    pub installed: bool,
+    pub download_total: Option<String>,
+    // pub dirs: Vec<String>,
+}
+
 pub struct UpdateResult {
     pub addons_updated: Vec<AddonDetails>,
     pub missing_deps: Vec<AddonDepOption>,

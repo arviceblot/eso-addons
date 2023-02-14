@@ -6,14 +6,15 @@ use crate::api::ApiClient;
 use crate::config::{self, get_config_dir, EAM_CONF, EAM_DB};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
+use entity::addon_detail as AddonDetail;
 use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::installed_addon as InstalledAddon;
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
-    ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, JoinType, ModelTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
+    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, JoinType,
+    ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
 };
 use snafu::ResultExt;
 use std::io::{self, Seek, Write};
@@ -45,7 +46,8 @@ impl AddonService {
 
         // init api/download client
         // TODO: consider moving endpoint_url to config as default value
-        let client = ApiClient::new("https://api.mmoui.com/v3");
+        let mut client = ApiClient::new("https://api.mmoui.com/v3");
+        client.update_endpoints_from_config(&config);
 
         // create db file if not exists
         let db_file = config_dir.join(EAM_DB);
@@ -397,11 +399,50 @@ impl AddonService {
         need_installs
     }
 
-    pub async fn get_addon_details(&self, addon_id: i32) -> Result<Vec<AddonDetails>> {
+    pub async fn get_addon_details(&self, addon_id: i32) -> Result<Option<AddonShowDetails>> {
         // first, update the details from API
         let details = self.api.get_file_details(addon_id).await?;
         // now update the db record
-        Ok(vec![])
+        let addon = DbAddon::Entity::find_by_id(addon_id)
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)
+            .unwrap();
+        let mut addon: DbAddon::ActiveModel = addon.unwrap().into();
+        addon.md5 = Set(Some(details.md5));
+        addon.file_name = Set(Some(details.file_name));
+        addon.download = Set(Some(details.download_url));
+        addon.update(&self.db).await.unwrap();
+        // and update the details record
+        let addon_dets = AddonDetail::ActiveModel {
+            id: ActiveValue::set(addon_id),
+            description: ActiveValue::set(Some(details.description)),
+            change_log: ActiveValue::set(Some(details.change_log)),
+        };
+        AddonDetail::Entity::insert(addon_dets)
+            .on_conflict(
+                OnConflict::column(AddonDetail::Column::Id)
+                    .update_columns([
+                        AddonDetail::Column::Description,
+                        AddonDetail::Column::ChangeLog,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
+        let result = DbAddon::Entity::find_by_id(addon_id)
+            .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+            .column_as(Category::Column::Title, "category")
+            .inner_join(Category::Entity)
+            .inner_join(AddonDetail::Entity)
+            .left_join(InstalledAddon::Entity)
+            .into_model::<AddonShowDetails>()
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)
+            .unwrap();
+        Ok(result)
     }
 
     fn get_addon_dir(&self) -> PathBuf {
