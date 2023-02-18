@@ -49,6 +49,10 @@ pub struct AddonShowDetails {
     pub date: String,
     pub installed: bool,
     pub download_total: Option<String>,
+    pub file_info_url: String,
+    pub download: Option<String>,
+    pub file_name: Option<String>,
+    pub md5: Option<String>,
     // pub dirs: Vec<String>,
 }
 

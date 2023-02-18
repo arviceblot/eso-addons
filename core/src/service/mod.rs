@@ -9,6 +9,7 @@ use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
 use entity::addon_dir as AddonDir;
 use entity::category as Category;
+use entity::category_parent as CategoryParent;
 use entity::installed_addon as InstalledAddon;
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
@@ -92,9 +93,12 @@ impl AddonService {
         entry.download = ActiveValue::Set(Some(file_details.download_url.to_owned()));
         entry.version = ActiveValue::Set(file_details.version.to_owned());
         entry.date = ActiveValue::Set(file_details.date.to_string());
+        entry.md5 = ActiveValue::Set(Some(file_details.md5));
+        entry.file_name = ActiveValue::Set(Some(file_details.file_name));
+        entry.download = ActiveValue::Set(Some(file_details.download_url.to_owned()));
 
         let installed = self
-            .fs_download_addon(&file_details.download_url)
+            .fs_download_addon(&file_details.download_url.to_owned())
             .await
             .unwrap();
         let installed_entry = InstalledAddon::ActiveModel {
@@ -102,6 +106,7 @@ impl AddonService {
             version: ActiveValue::Set(file_details.version),
             date: ActiveValue::Set(file_details.date.to_string()),
         };
+        entry.update(&self.db).await.unwrap();
 
         InstalledAddon::Entity::insert(installed_entry)
             .on_conflict(
@@ -109,6 +114,24 @@ impl AddonService {
                     .update_columns([
                         InstalledAddon::Column::Date,
                         InstalledAddon::Column::Version,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
+
+        let addon_detail = AddonDetail::ActiveModel {
+            id: ActiveValue::Set(addon_id),
+            description: ActiveValue::Set(Some(file_details.description)),
+            change_log: ActiveValue::Set(Some(file_details.change_log)),
+        };
+        AddonDetail::Entity::insert(addon_detail)
+            .on_conflict(
+                OnConflict::column(AddonDetail::Column::Id)
+                    .update_columns([
+                        AddonDetail::Column::Description,
+                        AddonDetail::Column::ChangeLog,
                     ])
                     .to_owned(),
             )
@@ -248,6 +271,7 @@ impl AddonService {
     async fn update_categories(&self) -> Result<()> {
         let categories = self.api.get_categories().await?;
         let mut insert_categories = vec![];
+        let mut category_parents = vec![];
         for category in categories.iter() {
             let db_category = Category::ActiveModel {
                 id: ActiveValue::Set(category.id.parse().unwrap()),
@@ -256,6 +280,14 @@ impl AddonService {
                 file_count: ActiveValue::Set(Some(category.file_count.parse().unwrap())),
             };
             insert_categories.push(db_category);
+
+            for parent_id in category.parent_ids.iter() {
+                let db_parent = CategoryParent::ActiveModel {
+                    id: ActiveValue::Set(category.id.parse().unwrap()),
+                    parent_id: ActiveValue::Set(parent_id.parse().unwrap()),
+                };
+                category_parents.push(db_parent);
+            }
         }
         Category::Entity::insert_many(insert_categories)
             .on_conflict(
@@ -265,6 +297,15 @@ impl AddonService {
                         Category::Column::Icon,
                         Category::Column::FileCount,
                     ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
+        CategoryParent::Entity::insert_many(category_parents)
+            .on_conflict(
+                OnConflict::columns([CategoryParent::Column::Id, CategoryParent::Column::ParentId])
+                    .do_nothing()
                     .to_owned(),
             )
             .exec(&self.db)
