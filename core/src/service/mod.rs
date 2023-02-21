@@ -26,7 +26,7 @@ use self::fs_util::{fs_delete_addon, fs_get_addons, fs_read_addon};
 use self::result::*;
 
 mod fs_util;
-mod result;
+pub mod result;
 
 #[derive(Debug)]
 pub struct AddonService {
