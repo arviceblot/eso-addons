@@ -1,0 +1,26 @@
+[package]
+name = "eso-addons"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "eso-addons"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "3.1.18", features = ["derive", "cargo"] }
+dirs = "4.0"
+prettytable-rs = "^0.8"
+requestty = "0.3"
+colored = "2"
+sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros", "debug-print" ] }
+futures = "0.3"
+eso-addons-core = { path = "../core" }
+migration = { path = "../migration" }
+entity = { path = "../entity" }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3.16"
+tracing = "0.1.37"
+dotenv = "0.15.0"

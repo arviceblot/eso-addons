@@ -1,6 +1,6 @@
 use clap::Parser;
 use colored::*;
-use eso_addons::{
+use eso_addons_core::{
     addons::{Addon, Manager},
     config::Config,
 };
@@ -19,8 +19,10 @@ impl CleanCommand {
         let desired_addons = &config.addons;
         let installed_addons_list = addon_manager.get_addons()?;
 
-        let unmanaged =
-            eso_addons::get_unmanaged_addons(&desired_addons, installed_addons_list.addons.iter());
+        let unmanaged = eso_addons_core::get_unmanaged_addons(
+            &desired_addons,
+            installed_addons_list.addons.iter(),
+        );
 
         if unmanaged.len() > 0 {
             match self.remove {

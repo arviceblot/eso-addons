@@ -1,0 +1,9 @@
+{
+    "rust-analyzer.check.command": "clippy",
+    "files.associations": {
+        "*.ui": "xml"
+    },
+    "[xml]": {
+        "editor.tabSize": 2
+    }
+}

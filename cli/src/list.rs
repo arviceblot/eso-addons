@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use colored::*;
-use eso_addons::addons::Manager;
-use eso_addons::config::Config;
+use eso_addons_core::{addons::Manager, config::Config};
 use prettytable::{format, Table};
 
 use super::Result;
@@ -53,7 +52,8 @@ impl ListCommand {
             };
         }
 
-        for addon in eso_addons::get_missing_dependencies(&installed_addons_list.addons).into_iter()
+        for addon in
+            eso_addons_core::get_missing_dependencies(&installed_addons_list.addons).into_iter()
         {
             if !addon_status.contains_key(&addon) {
                 addon_status.insert(addon.clone(), vec![]);
@@ -64,7 +64,7 @@ impl ListCommand {
                 .map(|x| x.push("MISSING".red().to_string()));
         }
         for addon in
-            eso_addons::get_unused_dependencies(&installed_addons_list.addons, desired_addons)
+            eso_addons_core::get_unused_dependencies(&installed_addons_list.addons, desired_addons)
         {
             if !addon_status.contains_key(&addon) {
                 addon_status.insert(addon.clone(), vec![]);
