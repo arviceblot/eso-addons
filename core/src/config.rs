@@ -133,11 +133,13 @@ fn get_initial_config() -> Config {
 
 #[cfg(target_os = "macos")]
 fn get_initial_config() -> Config {
+    let addon_dir = dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR);
     Config {
-        addon_dir: PathBuf::new(),
+        addon_dir,
         addons: vec![],
         file_details: "".to_string(),
         file_list: "".to_string(),
         list_files: "".to_string(),
+        category_list: "".to_string(),
     }
 }
