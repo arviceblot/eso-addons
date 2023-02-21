@@ -30,7 +30,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt update
-          sudp apt libssl-dev
+          sudo apt libssl-dev
 
       - name: Build
         run: cargo build --all --release && strip target/release/PROJECT_NAME && mv target/release/PROJECT_NAME target/release/PROJECT_NAME_amd64
