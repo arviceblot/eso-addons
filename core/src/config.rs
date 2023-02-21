@@ -109,6 +109,7 @@ fn get_initial_config() -> Config {
         file_details: "".to_string(),
         file_list: "".to_string(),
         list_files: "".to_string(),
+        category_list: "".to_string(),
     }
 }
 
