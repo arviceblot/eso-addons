@@ -21,12 +21,15 @@ use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
+use zip::ZipArchive;
 
 use self::fs_util::{fs_delete_addon, fs_get_addons, fs_read_addon};
 use self::result::*;
 
 mod fs_util;
 pub mod result;
+
+const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 
 #[derive(Debug)]
 pub struct AddonService {
@@ -490,7 +493,11 @@ impl AddonService {
         self.config.addon_dir.clone()
     }
 
-    pub async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
+    async fn base_fs_download_extract(
+        &self,
+        url: &str,
+        path_addr: Option<&str>,
+    ) -> Result<ZipArchive<File>> {
         let response = tokio::join!(async move {
             self.api
                 .download_file(url)
@@ -521,6 +528,10 @@ impl AddonService {
             let outpath = match file.enclosed_name() {
                 Some(path) => {
                     let mut p = self.get_addon_dir().clone();
+                    if path_addr.is_some() {
+                        // append additional path if defined
+                        p.push(path_addr.unwrap());
+                    }
                     p.push(path);
                     p
                 }
@@ -547,6 +558,11 @@ impl AddonService {
             }
         }
 
+        Ok(archive)
+    }
+
+    pub async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
+        let mut archive = self.base_fs_download_extract(url, None).await.unwrap();
         let mut addon_path = self.get_addon_dir();
         let addon_name = archive
             .by_index(0)
@@ -557,5 +573,12 @@ impl AddonService {
         let addon = fs_read_addon(&addon_path);
 
         Ok(addon.unwrap())
+    }
+
+    pub async fn update_ttc_pricetable(&self) -> Result<()> {
+        self.base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"))
+            .await
+            .unwrap();
+        Ok(())
     }
 }

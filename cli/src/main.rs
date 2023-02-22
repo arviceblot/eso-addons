@@ -53,10 +53,24 @@ impl AddCommand {
 }
 
 #[derive(Parser)]
-struct UpdateCommand {}
+struct UpdateCommand {
+    #[clap(
+        long,
+        short,
+        action,
+        help = "Optionally only update the TamrielTradeCentre Price Table"
+    )]
+    ttc_pricetable: bool,
+}
 
 impl UpdateCommand {
     pub async fn run(&self, service: &mut AddonService) -> Result<()> {
+        // Check if only updating PriceTable
+        if self.ttc_pricetable {
+            service.update_ttc_pricetable().await?;
+            return Ok(());
+        }
+
         let result = service.update().await?;
 
         if result.addons_updated.is_empty() {
