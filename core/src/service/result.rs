@@ -1,5 +1,4 @@
 use entity::addon as DbAddon;
-use entity::installed_addon as InstalledAddon;
 use sea_orm::FromQueryResult;
 use serde_derive::{Deserialize, Serialize};
 
