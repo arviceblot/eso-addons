@@ -4,7 +4,7 @@ use eso_addons_core::service::AddonService;
 use std::fmt;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use tokio::runtime;
+use tokio::runtime::{self, Runtime};
 
 const APP_NAME: &str = "ESO Addon Manager";
 const REPO: Option<&str> = option_env!("CARGO_PKG_REPOSITORY");
@@ -36,45 +36,108 @@ impl fmt::Display for Sort {
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum View {
+enum ViewOpt {
     Installed,
     Search,
     Browse,
 }
 
 struct EamApp {
-    rt: runtime::Runtime,
-    service: AddonService,
-    init: bool,
-    addons_updated: Vec<String>,
-    installed_addons: Vec<SearchDbAddon>,
-    filter: String,
-    sort: Sort,
-    prev_sort: Sort,
-    view: View,
+    view: ViewOpt,
+    installed_view: Installed,
+    search: Search,
 }
 
 impl EamApp {
     pub fn new() -> EamApp {
+        EamApp {
+            view: ViewOpt::Installed,
+            installed_view: Installed::new(),
+            search: Search::new(),
+        }
+    }
+}
+
+impl eframe::App for EamApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Save").clicked() {
+                        // TODO: Add functionality
+                    }
+                    if ui.button("Quit").clicked() {
+                        frame.close();
+                    }
+                });
+                ui.menu_button("Help", |ui| {
+                    if ui.button("Logs").clicked() {
+                        // TODO: Add functionality
+                    }
+                    if ui.button("About").clicked() {
+                        // TODO: Add functionality
+                    }
+                    if REPO.is_some() {
+                        ui.hyperlink_to("Source on GitHub", REPO.unwrap());
+                    }
+                })
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
+                ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
+                ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
+            });
+            ui.separator();
+
+            match self.view {
+                ViewOpt::Installed => {
+                    self.installed_view.get_installed_addons();
+                    self.installed_view.ui(ui);
+                }
+                ViewOpt::Search => {
+                    self.search.ui(ui);
+                }
+                ViewOpt::Browse => todo!(),
+            }
+        });
+    }
+}
+
+struct Installed {
+    installed_addons: Vec<SearchDbAddon>,
+    addons_updated: Vec<String>,
+    filter: String,
+    sort: Sort,
+    prev_sort: Sort,
+    init: bool,
+    editing: bool,
+    rt: Runtime,
+    service: AddonService,
+}
+pub trait View {
+    fn ui(&mut self, ui: &mut egui::Ui);
+}
+
+impl Installed {
+    pub fn new() -> Installed {
         let rt = runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let service = rt.block_on(AddonService::new());
-
-        EamApp {
-            rt,
-            init: true,
-            service,
-            addons_updated: vec![],
+        Installed {
             installed_addons: vec![],
+            addons_updated: vec![],
             filter: Default::default(),
             sort: Sort::Name,
             prev_sort: Sort::Name,
-            view: View::Installed,
+            init: true,
+            editing: false,
+            rt,
+            service,
         }
     }
-
     fn show_init(&mut self) -> bool {
         let init = self.init;
         if self.init {
@@ -130,100 +193,150 @@ impl EamApp {
             Sort::Id => self.installed_addons.sort_by(|a, b| a.id.cmp(&b.id)),
         }
     }
+    fn remove_addon(&self, addon_id: i32) {
+        self.rt.block_on(self.service.remove(addon_id)).unwrap();
+    }
 }
+impl View for Installed {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        if self.show_init() {
+            // TODO: move blocking install count out of update loop!
+            self.get_installed_addons();
+        }
 
-impl eframe::App for EamApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.show_init() {
-                // TODO: move blocking install count out of update loop!
-                self.get_installed_addons();
-            }
+        if self.installed_addons.is_empty() {
+            ui.label("No addons installed!");
+        } else {
             self.handle_sort();
-
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Save").clicked() {
-                        // TODO: Add functionality
-                    }
-                    if ui.button("Quit").clicked() {
-                        frame.close();
-                    }
-                });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Logs").clicked() {
-                        // TODO: Add functionality
-                    }
-                    if ui.button("About").clicked() {
-                        // TODO: Add functionality
-                    }
-                    if REPO.is_some() {
-                        ui.hyperlink_to("Source on GitHub", REPO.unwrap());
-                    }
-                })
-            });
-            ui.separator();
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.view, View::Installed, "Installed");
-                ui.selectable_value(&mut self.view, View::Search, "Search");
-                ui.selectable_value(&mut self.view, View::Browse, "Browse");
-            });
-            ui.separator();
-
-            if self.installed_addons.is_empty() {
-                ui.label("No addons installed!");
-            } else {
                 if ui.button("Update").clicked() {
                     // TODO: move blocking update out of update loop!
                     self.update_addons();
                 }
-                ui.label(format!("Installed: {}", self.installed_addons.len()));
-                ui.horizontal(|ui| {
-                    ui.label("Filter:");
-                    ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
-                    self.filter = self.filter.to_lowercase();
-                    if ui.button("ｘ").clicked() {
-                        self.filter.clear();
-                    }
-                    egui::ComboBox::from_label("Sort")
-                        .selected_text(format!("{}", self.sort))
-                        .show_ui(ui, |ui| {
-                            ui.style_mut().wrap = Some(false);
-                            ui.set_min_width(60.0);
-                            for sort in Sort::iter() {
-                                ui.selectable_value(&mut self.sort, sort, sort.to_string());
-                            }
-                        });
-                });
-                ui.separator();
-                ui.vertical_centered_justified(|ui| {
-                    ScrollArea::vertical()
-                        .max_height(200.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                for addon in self.installed_addons.iter() {
-                                    ui.label(addon.name.as_str());
-                                }
-                            });
-                        });
-                });
-                ui.separator();
-            }
-
-            // log scroll area
-            ui.collapsing("Log", |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ScrollArea::vertical().max_height(20.0).show(ui, |ui| {
+                ui.checkbox(&mut self.editing, "Edit");
+            });
+            ui.label(format!("Installed: {}", self.installed_addons.len()));
+            ui.horizontal(|ui| {
+                ui.label("Filter:");
+                ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
+                self.filter = self.filter.to_lowercase();
+                if ui.button("ｘ").clicked() {
+                    self.filter.clear();
+                }
+                egui::ComboBox::from_label("Sort")
+                    .selected_text(format!("{}", self.sort))
+                    .show_ui(ui, |ui| {
+                        ui.style_mut().wrap = Some(false);
+                        ui.set_min_width(60.0);
+                        for sort in Sort::iter() {
+                            ui.selectable_value(&mut self.sort, sort, sort.to_string());
+                        }
+                    });
+            });
+            ui.separator();
+            ui.vertical_centered_justified(|ui| {
+                ScrollArea::vertical()
+                    .max_height(200.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
                         ui.vertical(|ui| {
-                            for update in self.addons_updated.iter() {
-                                ui.label(update);
+                            let mut remove_id: Option<i32> = Default::default();
+                            for addon in self.installed_addons.iter() {
+                                ui.horizontal(|ui| {
+                                    if self.editing && ui.button("-").clicked() {
+                                        remove_id = Some(addon.id);
+                                    }
+                                    ui.label(addon.name.as_str());
+                                });
+                            }
+                            if remove_id.is_some() {
+                                self.remove_addon(remove_id.unwrap());
+                                self.get_installed_addons();
                             }
                         });
                     });
+            });
+            ui.separator();
+        }
+        // log scroll area
+        ui.collapsing("Log", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ScrollArea::vertical().max_height(20.0).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        for update in self.addons_updated.iter() {
+                            ui.label(update);
+                        }
+                    });
                 });
             });
+        });
+    }
+}
+
+struct Search {
+    results: Vec<SearchDbAddon>,
+    search: String,
+    rt: Runtime,
+    service: AddonService,
+}
+impl Search {
+    pub fn new() -> Search {
+        let rt = runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let service = rt.block_on(AddonService::new());
+        Search {
+            results: vec![],
+            search: Default::default(),
+            rt,
+            service,
+        }
+    }
+
+    fn handle_search(&mut self) {
+        self.search = self.search.to_lowercase();
+        let results = self.rt.block_on(self.service.search(&self.search)).unwrap();
+        self.results = results;
+    }
+
+    fn install_addon(&self, addon_id: i32) {
+        self.rt
+            .block_on(self.service.install(addon_id, false))
+            .unwrap();
+    }
+}
+impl View for Search {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search"));
+            if ui.button("Search").clicked() {
+                self.handle_search();
+            }
+        });
+        ui.separator();
+
+        ui.vertical_centered_justified(|ui| {
+            ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        let mut installed = false;
+                        for result in self.results.iter() {
+                            ui.horizontal(|ui| {
+                                if !result.installed && ui.button("+").clicked() {
+                                    self.install_addon(result.id);
+                                    installed = true;
+                                }
+                                ui.label(result.name.as_str());
+                            });
+                        }
+                        if installed {
+                            self.handle_search();
+                        }
+                    });
+                });
         });
     }
 }
