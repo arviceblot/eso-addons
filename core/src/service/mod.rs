@@ -389,19 +389,18 @@ impl AddonService {
         Ok(count)
     }
 
-    pub async fn get_installed_addons(&self) -> Result<Vec<SearchDbAddon>> {
-        let mut return_results = vec![];
-        let results = InstalledAddon::Entity::find()
-            .find_also_related(DbAddon::Entity)
+    pub async fn get_installed_addons(&self) -> Result<Vec<AddonShowDetails>> {
+        // let mut return_results = vec![];
+        let results = DbAddon::Entity::find()
+            .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+            .column_as(Category::Column::Title, "category")
+            .inner_join(Category::Entity)
+            .inner_join(InstalledAddon::Entity)
+            .into_model::<AddonShowDetails>()
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        for (_, addon) in results.iter() {
-            let mut result: SearchDbAddon = addon.as_ref().unwrap().into();
-            result.installed = true;
-            return_results.push(result);
-        }
-        Ok(return_results)
+        Ok(results)
     }
 
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
@@ -444,6 +443,7 @@ impl AddonService {
     }
 
     pub async fn get_addon_details(&self, addon_id: i32) -> Result<Option<AddonShowDetails>> {
+        // TODO: Move update API call out of get details
         // first, update the details from API
         let details = self.api.get_file_details(addon_id).await?;
         // now update the db record
@@ -580,5 +580,9 @@ impl AddonService {
             .await
             .unwrap();
         Ok(())
+    }
+
+    pub fn save_config(&self) {
+        config::save_config(&self.config_filepath, &self.config).unwrap();
     }
 }
