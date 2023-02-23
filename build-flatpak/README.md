@@ -11,7 +11,25 @@ python3 flatpak-cargo-generator.py Cargo.lock -o cargo-sources.json
 Test the build/install with:
 
 ```shell
-flatpak-builder --install ./test-flatpak com.arviceblot.eso-addon-manager.json --user -y
+flatpak-builder --install --force-clean ./test-flatpak com.arviceblot.eso-addon-manager.json --user -y
+```
+
+On Steam Deck, flatpak-builder is not immediately available, but can be installed via flatpak:
+
+```shell
+flatpak install flathub org.flatpak.Builder
+```
+
+Then build with:
+
+```shell
+flatpak run org.flatpak.Builder --install --force-clean ./test-flatpak com.arviceblot.eso-addon-manager.json --user -y
+```
+
+You may also need to install the rust extension if a build error indicates it is missing:
+
+```shell
+flatpak install org.freedesktop.Sdk.Extension.rust-stable
 ```
 
 Test running with:
