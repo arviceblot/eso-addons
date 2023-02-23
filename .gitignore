@@ -71,3 +71,6 @@ target/
 
 
 .env
+.flatpak-builder/
+flatpak-cargo-generator.py
+test-flatpak/

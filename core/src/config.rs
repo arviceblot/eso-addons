@@ -41,6 +41,8 @@ pub struct Config {
     pub list_files: String,
     #[serde(default = "default_str")]
     pub category_list: String,
+    pub update_ttc_pricetable: Option<bool>,
+    pub update_on_launch: Option<bool>,
 }
 
 fn default_str() -> String {
@@ -110,6 +112,8 @@ fn get_initial_config() -> Config {
         file_list: "".to_string(),
         list_files: "".to_string(),
         category_list: "".to_string(),
+        update_ttc_pricetable: Some(false),
+        update_on_launch: Some(false),
     }
 }
 
@@ -129,6 +133,8 @@ fn get_initial_config() -> Config {
         file_list: "".to_string(),
         list_files: "".to_string(),
         category_list: "".to_string(),
+        update_ttc_pricetable: Some(false),
+        update_on_launch: Some(false),
     }
 }
 
@@ -142,5 +148,7 @@ fn get_initial_config() -> Config {
         file_list: "".to_string(),
         list_files: "".to_string(),
         category_list: "".to_string(),
+        update_ttc_pricetable: Some(false),
+        update_on_launch: Some(false),
     }
 }

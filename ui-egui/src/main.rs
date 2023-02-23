@@ -1,5 +1,6 @@
-use eframe::egui::{self, ScrollArea};
-use eso_addons_core::service::result::SearchDbAddon;
+use eframe::egui::{self, RichText, ScrollArea};
+use eframe::epaint::Color32;
+use eso_addons_core::service::result::{AddonShowDetails, SearchDbAddon};
 use eso_addons_core::service::AddonService;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -59,26 +60,50 @@ impl EamApp {
 }
 
 impl eframe::App for EamApp {
+    fn on_close_event(&mut self) -> bool {
+        self.installed_view.service.save_config();
+        true
+    }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Save").clicked() {
-                        // TODO: Add functionality
-                    }
+                    // if ui.button("Save").clicked() {
+                    //     // TODO: Add functionality
+                    // }
                     if ui.button("Quit").clicked() {
                         frame.close();
                     }
                 });
+                ui.menu_button("Settings", |ui| {
+                    ui.checkbox(
+                        &mut self
+                            .installed_view
+                            .service
+                            .config
+                            .update_on_launch
+                            .get_or_insert(false),
+                        "Update on launch",
+                    );
+                    ui.checkbox(
+                        &mut self
+                            .installed_view
+                            .service
+                            .config
+                            .update_ttc_pricetable
+                            .get_or_insert(false),
+                        "Update TTC PriceTable",
+                    );
+                });
                 ui.menu_button("Help", |ui| {
-                    if ui.button("Logs").clicked() {
-                        // TODO: Add functionality
-                    }
-                    if ui.button("About").clicked() {
-                        // TODO: Add functionality
-                    }
+                    // if ui.button("Logs").clicked() {
+                    //     // TODO: Add functionality
+                    // }
+                    // if ui.button("About").clicked() {
+                    //     // TODO: Add functionality
+                    // }
                     if REPO.is_some() {
-                        ui.hyperlink_to("Source on GitHub", REPO.unwrap());
+                        ui.hyperlink_to("GitHub", REPO.unwrap());
                     }
                 })
             });
@@ -98,14 +123,16 @@ impl eframe::App for EamApp {
                 ViewOpt::Search => {
                     self.search.ui(ui);
                 }
-                ViewOpt::Browse => todo!(),
+                ViewOpt::Browse => {
+                    // TODO:
+                }
             }
         });
     }
 }
 
 struct Installed {
-    installed_addons: Vec<SearchDbAddon>,
+    installed_addons: Vec<AddonShowDetails>,
     addons_updated: Vec<String>,
     filter: String,
     sort: Sort,
@@ -155,6 +182,14 @@ impl Installed {
             self.addons_updated
                 .push("Everything up to date!".to_string());
         }
+
+        if self.service.config.update_ttc_pricetable.unwrap_or(false) {
+            self.rt
+                .block_on(self.service.update_ttc_pricetable())
+                .unwrap();
+            self.addons_updated
+                .push("TTC PriceTable Updated!".to_string());
+        }
     }
     fn get_installed_addons(&mut self) {
         let result = self
@@ -172,15 +207,15 @@ impl Installed {
     }
     fn sort_addons(&mut self) {
         match self.sort {
-            Sort::Author => {
-                // TODO:
-            }
+            Sort::Author => self.installed_addons.sort_by(|a, b| {
+                a.author_name
+                    .to_lowercase()
+                    .cmp(&b.author_name.to_lowercase())
+            }),
             Sort::Name => self
                 .installed_addons
                 .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-            Sort::Updated => {
-                // TODO: add date to SearchDbAddon to use this sort
-            }
+            Sort::Updated => self.installed_addons.sort_by(|a, b| a.date.cmp(&b.date)),
             Sort::TotalDownloads => {
                 // TODO:
             }
@@ -201,6 +236,9 @@ impl View for Installed {
     fn ui(&mut self, ui: &mut egui::Ui) {
         if self.show_init() {
             // TODO: move blocking install count out of update loop!
+            if self.service.config.update_on_launch.unwrap_or(false) {
+                self.update_addons();
+            }
             self.get_installed_addons();
         }
 
@@ -209,22 +247,12 @@ impl View for Installed {
         } else {
             self.handle_sort();
             ui.horizontal(|ui| {
-                if ui.button("Update").clicked() {
+                if ui.button("Update All").clicked() {
                     // TODO: move blocking update out of update loop!
                     self.update_addons();
                 }
-                ui.checkbox(&mut self.editing, "Edit");
-            });
-            ui.label(format!("Installed: {}", self.installed_addons.len()));
-            ui.horizontal(|ui| {
-                ui.label("Filter:");
-                ui.add(egui::TextEdit::singleline(&mut self.filter).desired_width(120.0));
-                self.filter = self.filter.to_lowercase();
-                if ui.button("ｘ").clicked() {
-                    self.filter.clear();
-                }
-                egui::ComboBox::from_label("Sort")
-                    .selected_text(format!("{}", self.sort))
+                egui::ComboBox::from_id_source("sort")
+                    .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
                     .show_ui(ui, |ui| {
                         ui.style_mut().wrap = Some(false);
                         ui.set_min_width(60.0);
@@ -232,6 +260,19 @@ impl View for Installed {
                             ui.selectable_value(&mut self.sort, sort, sort.to_string());
                         }
                     });
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.filter)
+                        .desired_width(120.0)
+                        .hint_text("Filter..."),
+                );
+                self.filter = self.filter.to_lowercase();
+                if ui.button("🗙").clicked() {
+                    self.filter.clear();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(format!("Installed: {}", self.installed_addons.len()));
+                ui.checkbox(&mut self.editing, "Edit");
             });
             ui.separator();
             ui.vertical_centered_justified(|ui| {
@@ -241,14 +282,84 @@ impl View for Installed {
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
                             let mut remove_id: Option<i32> = Default::default();
-                            for addon in self.installed_addons.iter() {
-                                ui.horizontal(|ui| {
-                                    if self.editing && ui.button("-").clicked() {
-                                        remove_id = Some(addon.id);
+                            egui::Grid::new("addon_grid")
+                                .striped(true)
+                                .spacing([5.0, 20.0])
+                                .show(ui, |ui| {
+                                    for addon in self.installed_addons.iter() {
+                                        // col0 x button if editing
+                                        if self.editing {
+                                            ui.horizontal_centered(|ui| {
+                                                if ui
+                                                    .button(RichText::new("🗙").color(Color32::RED))
+                                                    .clicked()
+                                                {
+                                                    remove_id = Some(addon.id);
+                                                }
+                                            });
+                                        }
+                                        // col1:
+                                        // addon_name, author
+                                        // category
+                                        ui.vertical(|ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    RichText::new(addon.name.as_str()).strong(),
+                                                );
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "by: {}",
+                                                        addon.author_name.as_str()
+                                                    ))
+                                                    .small(),
+                                                );
+                                            });
+                                            ui.label(
+                                                RichText::new(addon.category.as_str()).small(),
+                                            );
+                                        });
+                                        // col2:
+                                        // download total
+                                        // favorites
+                                        // version
+                                        ui.vertical(|ui| {
+                                            if addon.download_total.is_some() {
+                                                // "⮋" downloads
+                                                ui.add(
+                                                    egui::Label::new(format!(
+                                                        "⮋ {}",
+                                                        addon
+                                                            .download_total
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .as_str()
+                                                    ))
+                                                    .wrap(false),
+                                                );
+                                            }
+                                            // "♥" favorites
+                                            if addon.favorite_total.is_some() {
+                                                ui.add(
+                                                    egui::Label::new(format!(
+                                                        "♥ {}",
+                                                        addon
+                                                            .favorite_total
+                                                            .as_ref()
+                                                            .unwrap()
+                                                            .as_str()
+                                                    ))
+                                                    .wrap(false),
+                                                );
+                                            }
+                                            // "🔃" version
+                                            ui.add(
+                                                egui::Label::new(format!("🔃 {}", addon.version))
+                                                    .wrap(false),
+                                            );
+                                        });
+                                        ui.end_row();
                                     }
-                                    ui.label(addon.name.as_str());
                                 });
-                            }
                             if remove_id.is_some() {
                                 self.remove_addon(remove_id.unwrap());
                                 self.get_installed_addons();
