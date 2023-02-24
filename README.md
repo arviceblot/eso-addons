@@ -12,12 +12,13 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online designed
 - Specific support for ESO on the Steam Deck through Flathub
 - Option to update Tamriel Trade Centre prices
 - No Java!
+- Import managed addons from Minion
 
 ### Planned Features
 
 - Show additional addon details in search
 - Browse all addons by category and other filters
-- Import already installed addons to manage
+- Import already installed addons to manage (without Minion backup)
 
 ## Installing
 
