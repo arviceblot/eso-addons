@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use zip::ZipArchive;
 
-use self::fs_util::{fs_delete_addon, fs_get_addons, fs_read_addon};
+use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
 
 mod fs_util;
@@ -584,5 +584,24 @@ impl AddonService {
 
     pub fn save_config(&self) {
         config::save_config(&self.config_filepath, &self.config).unwrap();
+    }
+
+    pub async fn import_minion_file(&mut self, file: &PathBuf) {
+        // Takes a path to a minion backup file, it should be named something like `BU-addons.txt`
+        // It should contain a single line of comma-separated addon IDs
+
+        // If called on a new database, the main addon table will be empty. As a workaround, call `update()`.
+        // TODO: remove update from here. Maybe depends on separating the update from upgrade with issue #49
+        self.update().await.unwrap();
+
+        let line = fs::read_to_string(file).unwrap();
+        let ids: Vec<i32> = line
+            .split(',')
+            .filter(|&x| !x.is_empty())
+            .map(|x| x.parse::<i32>().unwrap())
+            .collect();
+        for addon_id in ids.iter() {
+            self.install(*addon_id, false).await.unwrap();
+        }
     }
 }

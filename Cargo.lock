@@ -1319,6 +1319,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_file"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "667861bdb6d3eb3f010f06f81aea27877b925757c47b875d5d205d747942c2fa"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui_glow"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1444,6 +1453,7 @@ name = "eso-addon-manager"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "egui_file",
  "eso-addons-core",
  "strum",
  "strum_macros",

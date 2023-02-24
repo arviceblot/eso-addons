@@ -74,3 +74,5 @@ target/
 .flatpak-builder/
 flatpak-cargo-generator.py
 test-flatpak/
+libs/
+*.AppImage

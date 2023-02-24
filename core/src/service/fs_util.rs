@@ -87,16 +87,22 @@ fn fs_open_addon_metadata_file(path: &Path, addon_name: &str) -> Result<File> {
 
 pub fn fs_read_addon(path: &Path) -> Result<Addon> {
     let addon_name = path.file_name().unwrap().to_str().unwrap();
-
-    let file = fs_open_addon_metadata_file(path, addon_name)?;
-    let re = Regex::new(r"## (.*): (.*)").unwrap();
-
     let mut addon = Addon {
         name: addon_name.to_owned(),
         depends_on: vec![],
     };
 
-    let reader = BufReader::new(file);
+    // Not all addons have a Metadata file but are still valid addons, such as HarvestMapData
+    let file = fs_open_addon_metadata_file(path, addon_name);
+    match file {
+        Ok(_) => {}
+        Err(_) => return Ok(addon),
+    }
+    let addon_file = file.unwrap();
+
+    let re = Regex::new(r"## (.*): (.*)").unwrap();
+
+    let reader = BufReader::new(addon_file);
     for line in reader.lines().flatten() {
         if line.starts_with("## DependsOn:") {
             let depends_on = match re.captures(&line) {

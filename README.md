@@ -12,21 +12,21 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online designed
 - Specific support for ESO on the Steam Deck through Flathub
 - Option to update Tamriel Trade Centre prices
 - No Java!
+- Import managed addons from Minion
 
 ### Planned Features
 
 - Show additional addon details in search
 - Browse all addons by category and other filters
-- Import already installed addons to manage
+- Import already installed addons to manage (without Minion backup)
 
 ## Installing
 
 TODO: Publish to Flathub and crates.io
 
-### Flatpak
+### AppImage
 
-See [flatpak-build](/build-flatpak/README.md) instructions.
-
+TODO:
 
 ## Building from source
 
@@ -36,13 +36,13 @@ cargo install --git https://github.com/arviceblot/eso-addons.git
 
 ## Running
 
-## Flatpak
+Run the app.
 
-```shell
-flatpak run com.arviceblot.eso-addon-manager
-```
+### AppImage with AppImageLauncher
 
-## CLI
+TODO:
+
+### CLI
 
 ```shell
 ❯ eso-addons --help
@@ -66,3 +66,7 @@ SUBCOMMANDS:
     show      Show addon details
     update    Update addons
 ```
+
+## Legacy
+
+This project was originally based on the work by Trojan295 at [Trojan295/eso-addons](https://github.com/Trojan295/eso-addons). It has since devolved into the abyss, but without his work I probably would not have even started on this silliness.
