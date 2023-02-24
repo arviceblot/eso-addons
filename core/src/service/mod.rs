@@ -586,9 +586,14 @@ impl AddonService {
         config::save_config(&self.config_filepath, &self.config).unwrap();
     }
 
-    pub async fn import_minion_file(&self, file: &PathBuf) {
+    pub async fn import_minion_file(&mut self, file: &PathBuf) {
         // Takes a path to a minion backup file, it should be named something like `BU-addons.txt`
         // It should contain a single line of comma-separated addon IDs
+
+        // If called on a new database, the main addon table will be empty. As a workaround, call `update()`.
+        // TODO: remove update from here. Maybe depends on separating the update from upgrade with issue #49
+        self.update().await.unwrap();
+
         let line = fs::read_to_string(file).unwrap();
         let ids: Vec<i32> = line
             .split(',')
