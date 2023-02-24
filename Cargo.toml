@@ -1,29 +1,28 @@
-# [package]
-# name = "eso-addon-manager"
-# version = "0.3.0"
-# authors = ["Damian Czaja <trojan295@protonmail.com>"]
-# edition = "2018"
+[package]
+name = "eso-addon-manager"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/arviceblot/eso-addons"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.appimage]
+auto_link = true
+auto_link_exclude_list = [
+    "libc.so*",
+    "libdl.so*",
+    "libpthread.so*",
+]
+
 [workspace]
-members = [".", "cli", "core", "entity", "migration", "ui-egui"]
+members = [".", "cli", "core", "entity", "migration"]
 
-# [dependencies]
-# toml = "0.5"
-# serde = "1.0"
-# serde_derive = "1.0"
-# clap = { version = "3.2.2", features = ["derive", "cargo"] }
-# dirs = "4.0"
-# regex = "1"
-# reqwest = { version = "0.11", features = ["gzip", "json"] }
-# openssl = { version = "0.10", features = ["vendored"] }
-# zip = "0.6"
-# scraper = "0.13.0"
-# tempfile = "3.1"
-# requestty = "0.3"
-# colored = "2"
-# prettytable-rs = "^0.9"
-# walkdir = "2"
-# sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros" ] }
-# tokio = { version = "1", features = ["full"] }
-# eso-addons-core = { path = "core"}
+[[bin]]
+name = "eso-addon-manager"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.21.3"
+tokio = { version = "1", features = ["full"] }
+eso-addons-core = { path = "./core" }
+strum = "0.24.1"
+strum_macros = "0.24.3"
+egui_file = "0.8.0"

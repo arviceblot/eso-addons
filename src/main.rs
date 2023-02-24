@@ -1,8 +1,10 @@
 use eframe::egui::{self, RichText, ScrollArea};
 use eframe::epaint::Color32;
+use egui_file::FileDialog;
 use eso_addons_core::service::result::{AddonShowDetails, SearchDbAddon};
 use eso_addons_core::service::AddonService;
 use std::fmt;
+use std::path::PathBuf;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use tokio::runtime::{self, Runtime};
@@ -41,59 +43,50 @@ enum ViewOpt {
     Installed,
     Search,
     Browse,
+    Settings,
 }
 
 struct EamApp {
     view: ViewOpt,
     installed_view: Installed,
     search: Search,
+    opened_file: Option<PathBuf>,
+    open_file_dialog: Option<FileDialog>,
+    rt: Runtime,
+    service: AddonService,
 }
 
 impl EamApp {
     pub fn new() -> EamApp {
+        let rt = runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let service = rt.block_on(AddonService::new());
         EamApp {
             view: ViewOpt::Installed,
             installed_view: Installed::new(),
             search: Search::new(),
+            opened_file: None,
+            open_file_dialog: None,
+            rt,
+            service,
         }
     }
 }
 
 impl eframe::App for EamApp {
     fn on_close_event(&mut self) -> bool {
-        self.installed_view.service.save_config();
+        self.service.save_config();
         true
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    // if ui.button("Save").clicked() {
-                    //     // TODO: Add functionality
-                    // }
                     if ui.button("Quit").clicked() {
                         frame.close();
                     }
-                });
-                ui.menu_button("Settings", |ui| {
-                    ui.checkbox(
-                        &mut self
-                            .installed_view
-                            .service
-                            .config
-                            .update_on_launch
-                            .get_or_insert(false),
-                        "Update on launch",
-                    );
-                    ui.checkbox(
-                        &mut self
-                            .installed_view
-                            .service
-                            .config
-                            .update_ttc_pricetable
-                            .get_or_insert(false),
-                        "Update TTC PriceTable",
-                    );
                 });
                 ui.menu_button("Help", |ui| {
                     // if ui.button("Logs").clicked() {
@@ -108,23 +101,58 @@ impl eframe::App for EamApp {
                 })
             });
             ui.separator();
+
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
                 ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
                 ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
+                ui.selectable_value(&mut self.view, ViewOpt::Settings, "Settings");
             });
             ui.separator();
 
             match self.view {
                 ViewOpt::Installed => {
-                    self.installed_view.get_installed_addons();
-                    self.installed_view.ui(ui);
+                    self.installed_view
+                        .get_installed_addons(&self.rt, &mut self.service);
+                    self.installed_view.ui(ui, &self.rt, &mut self.service);
                 }
                 ViewOpt::Search => {
-                    self.search.ui(ui);
+                    self.search.ui(ui, &self.rt, &mut self.service);
                 }
                 ViewOpt::Browse => {
                     // TODO:
+                }
+                ViewOpt::Settings => {
+                    ui.checkbox(
+                        self.service.config.update_on_launch.get_or_insert(false),
+                        "Update on launch",
+                    );
+                    ui.checkbox(
+                        self.service
+                            .config
+                            .update_ttc_pricetable
+                            .get_or_insert(false),
+                        "Update TTC PriceTable",
+                    );
+                    ui.separator();
+
+                    if ui.button("Import from Minion...").clicked() {
+                        let mut dialog = FileDialog::open_file(self.opened_file.clone());
+                        dialog.open();
+                        self.open_file_dialog = Some(dialog);
+                    }
+
+                    if let Some(dialog) = &mut self.open_file_dialog {
+                        if dialog.show(ctx).selected() {
+                            if let Some(file) = dialog.path() {
+                                self.opened_file = Some(file);
+                                self.rt.block_on(
+                                    self.service
+                                        .import_minion_file(self.opened_file.as_ref().unwrap()),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -139,20 +167,13 @@ struct Installed {
     prev_sort: Sort,
     init: bool,
     editing: bool,
-    rt: Runtime,
-    service: AddonService,
 }
 pub trait View {
-    fn ui(&mut self, ui: &mut egui::Ui);
+    fn ui(&mut self, ui: &mut egui::Ui, rt: &Runtime, service: &mut AddonService);
 }
 
 impl Installed {
     pub fn new() -> Installed {
-        let rt = runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let service = rt.block_on(AddonService::new());
         Installed {
             installed_addons: vec![],
             addons_updated: vec![],
@@ -161,8 +182,6 @@ impl Installed {
             prev_sort: Sort::Name,
             init: true,
             editing: false,
-            rt,
-            service,
         }
     }
     fn show_init(&mut self) -> bool {
@@ -172,8 +191,8 @@ impl Installed {
         }
         init
     }
-    fn update_addons(&mut self) {
-        let result = self.rt.block_on(self.service.update()).unwrap();
+    fn update_addons(&mut self, rt: &Runtime, service: &mut AddonService) {
+        let result = rt.block_on(service.update()).unwrap();
         for update in result.addons_updated.iter() {
             self.addons_updated
                 .push(format!("{} updated!", update.name));
@@ -183,19 +202,14 @@ impl Installed {
                 .push("Everything up to date!".to_string());
         }
 
-        if self.service.config.update_ttc_pricetable.unwrap_or(false) {
-            self.rt
-                .block_on(self.service.update_ttc_pricetable())
-                .unwrap();
+        if service.config.update_ttc_pricetable.unwrap_or(false) {
+            rt.block_on(service.update_ttc_pricetable()).unwrap();
             self.addons_updated
                 .push("TTC PriceTable Updated!".to_string());
         }
     }
-    fn get_installed_addons(&mut self) {
-        let result = self
-            .rt
-            .block_on(self.service.get_installed_addons())
-            .unwrap();
+    fn get_installed_addons(&mut self, rt: &Runtime, service: &mut AddonService) {
+        let result = rt.block_on(service.get_installed_addons()).unwrap();
         self.installed_addons = result;
         self.sort_addons();
     }
@@ -216,30 +230,63 @@ impl Installed {
                 .installed_addons
                 .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
             Sort::Updated => self.installed_addons.sort_by(|a, b| a.date.cmp(&b.date)),
-            Sort::TotalDownloads => {
-                // TODO:
-            }
-            Sort::MonthlyDownloads => {
-                // TODO:
-            }
-            Sort::Favorites => {
-                // TODO:
-            }
+            Sort::TotalDownloads => self.installed_addons.sort_by(|a, b| {
+                b.download_total
+                    .as_ref()
+                    .unwrap_or(&"0".to_string())
+                    .parse::<i32>()
+                    .unwrap_or(0)
+                    .cmp(
+                        &a.download_total
+                            .as_ref()
+                            .unwrap_or(&"0".to_string())
+                            .parse::<i32>()
+                            .unwrap_or(0),
+                    )
+            }),
+            Sort::MonthlyDownloads => self.installed_addons.sort_by(|a, b| {
+                b.download
+                    .as_ref()
+                    .unwrap_or(&"0".to_string())
+                    .parse::<i32>()
+                    .unwrap_or(0)
+                    .cmp(
+                        &a.download
+                            .as_ref()
+                            .unwrap_or(&"0".to_string())
+                            .parse::<i32>()
+                            .unwrap_or(0),
+                    )
+            }),
+            Sort::Favorites => self.installed_addons.sort_by(|a, b| {
+                b.favorite_total
+                    .as_ref()
+                    .unwrap_or(&"0".to_string())
+                    .parse::<i32>()
+                    .unwrap_or(0)
+                    .cmp(
+                        &a.favorite_total
+                            .as_ref()
+                            .unwrap_or(&"0".to_string())
+                            .parse::<i32>()
+                            .unwrap_or(0),
+                    )
+            }),
             Sort::Id => self.installed_addons.sort_by(|a, b| a.id.cmp(&b.id)),
         }
     }
-    fn remove_addon(&self, addon_id: i32) {
-        self.rt.block_on(self.service.remove(addon_id)).unwrap();
+    fn remove_addon(&self, addon_id: i32, rt: &Runtime, service: &mut AddonService) {
+        rt.block_on(service.remove(addon_id)).unwrap();
     }
 }
 impl View for Installed {
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(&mut self, ui: &mut egui::Ui, rt: &Runtime, service: &mut AddonService) {
         if self.show_init() {
             // TODO: move blocking install count out of update loop!
-            if self.service.config.update_on_launch.unwrap_or(false) {
-                self.update_addons();
+            if service.config.update_on_launch.unwrap_or(false) {
+                self.update_addons(rt, service);
             }
-            self.get_installed_addons();
+            self.get_installed_addons(rt, service);
         }
 
         if self.installed_addons.is_empty() {
@@ -249,7 +296,7 @@ impl View for Installed {
             ui.horizontal(|ui| {
                 if ui.button("Update All").clicked() {
                     // TODO: move blocking update out of update loop!
-                    self.update_addons();
+                    self.update_addons(rt, service);
                 }
                 egui::ComboBox::from_id_source("sort")
                     .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
@@ -360,9 +407,9 @@ impl View for Installed {
                                         ui.end_row();
                                     }
                                 });
-                            if remove_id.is_some() {
-                                self.remove_addon(remove_id.unwrap());
-                                self.get_installed_addons();
+                            if let Some(id) = remove_id {
+                                self.remove_addon(id, rt, service);
+                                self.get_installed_addons(rt, service);
                             }
                         });
                     });
@@ -388,42 +435,31 @@ impl View for Installed {
 struct Search {
     results: Vec<SearchDbAddon>,
     search: String,
-    rt: Runtime,
-    service: AddonService,
 }
 impl Search {
     pub fn new() -> Search {
-        let rt = runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let service = rt.block_on(AddonService::new());
         Search {
             results: vec![],
             search: Default::default(),
-            rt,
-            service,
         }
     }
 
-    fn handle_search(&mut self) {
+    fn handle_search(&mut self, rt: &Runtime, service: &mut AddonService) {
         self.search = self.search.to_lowercase();
-        let results = self.rt.block_on(self.service.search(&self.search)).unwrap();
+        let results = rt.block_on(service.search(&self.search)).unwrap();
         self.results = results;
     }
 
-    fn install_addon(&self, addon_id: i32) {
-        self.rt
-            .block_on(self.service.install(addon_id, false))
-            .unwrap();
+    fn install_addon(&self, addon_id: i32, rt: &Runtime, service: &mut AddonService) {
+        rt.block_on(service.install(addon_id, false)).unwrap();
     }
 }
 impl View for Search {
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn ui(&mut self, ui: &mut egui::Ui, rt: &Runtime, service: &mut AddonService) {
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search"));
             if ui.button("Search").clicked() {
-                self.handle_search();
+                self.handle_search(rt, service);
             }
         });
         ui.separator();
@@ -437,14 +473,14 @@ impl View for Search {
                         for result in self.results.iter() {
                             ui.horizontal(|ui| {
                                 if !result.installed && ui.button("+").clicked() {
-                                    self.install_addon(result.id);
+                                    self.install_addon(result.id, rt, service);
                                     installed = true;
                                 }
                                 ui.label(result.name.as_str());
                             });
                         }
                         if installed {
-                            self.handle_search();
+                            self.handle_search(rt, service);
                         }
                     });
                 });
@@ -454,7 +490,7 @@ impl View for Search {
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(600.0, 400.0)),
+        initial_window_size: Some(egui::vec2(960.0, 600.0)),
         ..Default::default()
     };
     eframe::run_native(APP_NAME, options, Box::new(|_cc| Box::new(EamApp::new())))

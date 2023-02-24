@@ -23,10 +23,9 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online designed
 
 TODO: Publish to Flathub and crates.io
 
-### Flatpak
+### AppImage
 
-See [flatpak-build](/build-flatpak/README.md) instructions.
-
+TODO:
 
 ## Building from source
 
@@ -36,13 +35,13 @@ cargo install --git https://github.com/arviceblot/eso-addons.git
 
 ## Running
 
-## Flatpak
+Run the app.
 
-```shell
-flatpak run com.arviceblot.eso-addon-manager
-```
+### AppImage with AppImageLauncher
 
-## CLI
+TODO:
+
+### CLI
 
 ```shell
 ❯ eso-addons --help
