@@ -11,6 +11,7 @@ use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::installed_addon as InstalledAddon;
+use lazy_async_promise::ImmediateValuePromise;
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
@@ -20,6 +21,7 @@ use sea_orm::{
 use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 use tempfile::NamedTempFile;
 use zip::ZipArchive;
 
@@ -411,20 +413,23 @@ impl AddonService {
         Ok(count)
     }
 
-    pub async fn get_installed_addons(&self) -> Result<Vec<AddonShowDetails>> {
+    pub fn get_installed_addons(&self) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         // let mut return_results = vec![];
-        let results = DbAddon::Entity::find()
-            .column_as(DbAddon::Column::Version, "version")
-            .column_as(InstalledAddon::Column::Version, "installed_version")
-            .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
-            .column_as(Category::Column::Title, "category")
-            .inner_join(Category::Entity)
-            .inner_join(InstalledAddon::Entity)
-            .into_model::<AddonShowDetails>()
-            .all(&self.db)
-            .await
-            .context(error::DbGetSnafu)?;
-        Ok(results)
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let results = DbAddon::Entity::find()
+                .column_as(DbAddon::Column::Version, "version")
+                .column_as(InstalledAddon::Column::Version, "installed_version")
+                .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+                .column_as(Category::Column::Title, "category")
+                .inner_join(Category::Entity)
+                .inner_join(InstalledAddon::Entity)
+                .into_model::<AddonShowDetails>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            Ok(results)
+        })
     }
 
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
@@ -698,5 +703,21 @@ impl AddonService {
             .unwrap();
         addons.truncate(100);
         Ok(addons)
+    }
+
+    pub fn test_primse(&self, addon_id: i32) -> ImmediateValuePromise<AddonDetails> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let addon = DbAddon::Entity::find_by_id(addon_id)
+                .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+                .left_join(InstalledAddon::Entity)
+                .into_model::<AddonDetails>()
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)
+                .unwrap()
+                .unwrap();
+            Ok(addon)
+        })
     }
 }

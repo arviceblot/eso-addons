@@ -1,7 +1,7 @@
 use eframe::egui;
-use eso_addons_core::service::result::AddonShowDetails;
-use eso_addons_core::service::{result::ParentCategory, AddonService};
-use tokio::runtime::Runtime;
+use eso_addons_core::service::result::{AddonShowDetails, ParentCategory};
+use eso_addons_core::service::AddonService;
+use tokio::runtime::{Handle, Runtime};
 
 use super::ui_helpers::ui_show_addon_item;
 use super::View;
@@ -15,7 +15,7 @@ pub struct Browse {
     previous_category: i32,
 }
 impl Browse {
-    fn handle_init(&mut self, rt: &Runtime, service: &AddonService) {
+    fn handle_init(&mut self, rt: &Handle, service: &AddonService) {
         if !self.is_init {
             self.parent_categories = rt.block_on(service.get_category_parents()).unwrap();
             self.is_init = true;
@@ -24,12 +24,12 @@ impl Browse {
             self.get_addons(rt, service);
         }
     }
-    fn get_addons(&mut self, rt: &Runtime, service: &AddonService) {
+    fn get_addons(&mut self, rt: &Handle, service: &AddonService) {
         self.displayed_addons = rt
             .block_on(service.get_addons_by_category(self.selected_category))
             .unwrap();
     }
-    fn install_addon(&self, addon_id: i32, rt: &Runtime, service: &mut AddonService) {
+    fn install_addon(&self, addon_id: i32, rt: &Handle, service: &mut AddonService) {
         rt.block_on(service.install(addon_id, false)).unwrap();
     }
 }
@@ -38,7 +38,7 @@ impl View for Browse {
         &mut self,
         ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
-        rt: &tokio::runtime::Runtime,
+        rt: &Handle,
         service: &mut AddonService,
     ) {
         self.handle_init(rt, service);

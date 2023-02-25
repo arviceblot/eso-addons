@@ -3,8 +3,9 @@ use eframe::{
     epaint::Color32,
 };
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
+use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use strum::IntoEnumIterator;
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 use super::{
     ui_helpers::{ui_show_addon_item, Sort},
@@ -12,7 +13,8 @@ use super::{
 };
 
 pub struct Installed {
-    installed_addons: Vec<AddonShowDetails>,
+    addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
+    installed_addons: Option<Vec<AddonShowDetails>>,
     displayed_addons: Vec<AddonShowDetails>,
     addons_updated: Vec<String>,
     filter: String,
@@ -25,7 +27,7 @@ pub struct Installed {
 impl Installed {
     pub fn new() -> Installed {
         Installed {
-            installed_addons: vec![],
+            installed_addons: None,
             displayed_addons: vec![],
             addons_updated: vec![],
             filter: Default::default(),
@@ -33,6 +35,7 @@ impl Installed {
             prev_sort: Sort::Name,
             init: true,
             editing: false,
+            addons_promise: None,
         }
     }
     fn show_init(&mut self) -> bool {
@@ -42,28 +45,39 @@ impl Installed {
         }
         init
     }
-    fn update_addons(&mut self, rt: &Runtime, service: &mut AddonService) {
-        let result = rt.block_on(service.upgrade()).unwrap();
-        for update in result.addons_updated.iter() {
-            self.addons_updated
-                .push(format!("{} updated!", update.name));
+    fn poll(&mut self) {
+        if self.addons_promise.is_some() {
+            let promise = self.addons_promise.as_mut().unwrap().poll_state();
+            if let ImmediateValueState::Success(val) = promise {
+                self.installed_addons = Some(val.to_vec()); // copy out of promise
+                self.addons_promise = None;
+                self.sort_addons();
+            }
         }
-        if result.addons_updated.is_empty() {
-            self.addons_updated
-                .push("Everything up to date!".to_string());
-        }
-
-        if service.config.update_ttc_pricetable.unwrap_or(false) {
-            rt.block_on(service.update_ttc_pricetable()).unwrap();
-            self.addons_updated
-                .push("TTC PriceTable Updated!".to_string());
-        }
-        self.get_installed_addons(rt, service);
     }
-    pub fn get_installed_addons(&mut self, rt: &Runtime, service: &mut AddonService) {
-        let result = rt.block_on(service.get_installed_addons()).unwrap();
-        self.installed_addons = result;
-        self.sort_addons();
+    fn update_addons(&mut self, service: &mut AddonService) {
+        // let result = rt.block_on(service.upgrade()).unwrap();
+        // for update in result.addons_updated.iter() {
+        //     self.addons_updated
+        //         .push(format!("{} updated!", update.name));
+        // }
+        // if result.addons_updated.is_empty() {
+        //     self.addons_updated
+        //         .push("Everything up to date!".to_string());
+        // }
+
+        // if service.config.update_ttc_pricetable.unwrap_or(false) {
+        //     rt.block_on(service.update_ttc_pricetable()).unwrap();
+        //     self.addons_updated
+        //         .push("TTC PriceTable Updated!".to_string());
+        // }
+        // self.get_installed_addons(rt, service);
+    }
+    pub fn get_installed_addons(&mut self, service: &mut AddonService) {
+        self.addons_promise = Some(service.get_installed_addons());
+        // let result = rt.block_on(service.get_installed_addons()).unwrap();
+        // self.installed_addons = result;
+        // self.sort_addons();
     }
     fn handle_sort(&mut self) {
         if self.prev_sort != self.sort {
@@ -72,7 +86,9 @@ impl Installed {
         }
     }
     fn sort_addons(&mut self) {
-        self.displayed_addons = self.installed_addons.to_vec();
+        if self.installed_addons.is_some() {
+            self.displayed_addons = self.installed_addons.as_ref().unwrap().to_vec();
+        }
         match self.sort {
             Sort::Author => self.displayed_addons.sort_unstable_by(|a, b| {
                 a.author_name
@@ -137,35 +153,44 @@ impl Installed {
             .sort_unstable_by_key(|b| std::cmp::Reverse(b.is_upgradable()));
     }
 
-    fn remove_addon(&self, addon_id: i32, rt: &Runtime, service: &mut AddonService) {
+    fn remove_addon(&self, addon_id: i32, rt: &Handle, service: &mut AddonService) {
         rt.block_on(service.remove(addon_id)).unwrap();
     }
 }
 impl View for Installed {
-    fn ui(
-        &mut self,
-        _ctx: &egui::Context,
-        ui: &mut egui::Ui,
-        rt: &Runtime,
-        service: &mut AddonService,
-    ) {
+    fn ui(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, service: &mut AddonService) {
         if self.show_init() {
             // TODO: move blocking install count out of update loop!
-            rt.block_on(service.update(false)).unwrap();
-            if service.config.update_on_launch.unwrap_or(false) {
-                rt.block_on(service.upgrade()).unwrap();
-            }
-            self.get_installed_addons(rt, service);
+            // rt.block_on(service.update(false)).unwrap();
+            // if service.config.update_on_launch.unwrap_or(false) {
+            //     rt.block_on(service.upgrade()).unwrap();
+            // }
+            self.get_installed_addons(service);
         }
 
-        if self.installed_addons.is_empty() {
+        // update promises
+        self.poll();
+
+        // if we are loading addons, show spinner and that's it
+        if self.addons_promise.is_some() {
+            ui.spinner();
+            return;
+        }
+
+        if self.installed_addons.is_none() && self.addons_promise.is_none() {
+            ui.label("Something's not right! No promise and no addons!");
+        }
+        if self.installed_addons.is_none() {
+            return;
+        }
+        if self.installed_addons.as_ref().unwrap().is_empty() {
             ui.label("No addons installed!");
         } else {
             self.handle_sort();
             ui.horizontal(|ui| {
                 if ui.button("Update All").clicked() {
                     // TODO: move blocking update out of update loop!
-                    self.update_addons(rt, service);
+                    // self.update_addons(rt, service);
                 }
                 egui::ComboBox::from_id_source("sort")
                     .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
@@ -186,7 +211,10 @@ impl View for Installed {
                 }
             });
             ui.horizontal(|ui| {
-                ui.label(format!("Installed: {}", self.installed_addons.len()));
+                ui.label(format!(
+                    "Installed: {}",
+                    self.installed_addons.as_ref().unwrap().len()
+                ));
                 ui.checkbox(&mut self.editing, "Edit");
             });
             ui.separator();
@@ -221,14 +249,14 @@ impl View for Installed {
                                         ui_show_addon_item(ui, addon);
 
                                         if addon.is_upgradable() && ui.button("Update").clicked() {
-                                            rt.block_on(service.install(addon.id, true)).unwrap();
+                                            // rt.block_on(service.install(addon.id, true)).unwrap();
                                         }
                                         ui.end_row();
                                     }
                                 });
                             if let Some(id) = remove_id {
-                                self.remove_addon(id, rt, service);
-                                self.get_installed_addons(rt, service);
+                                // self.remove_addon(id, rt, service);
+                                // self.get_installed_addons(rt, service);
                             }
                         });
                     });

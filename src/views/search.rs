@@ -1,7 +1,7 @@
 use super::{ui_helpers::ui_show_addon_item, View};
 use eframe::egui::{self, ScrollArea};
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 
 pub struct Search {
     results: Vec<AddonShowDetails>,
@@ -15,13 +15,13 @@ impl Search {
         }
     }
 
-    fn handle_search(&mut self, rt: &Runtime, service: &mut AddonService) {
+    fn handle_search(&mut self, rt: &Handle, service: &mut AddonService) {
         self.search = self.search.to_lowercase();
         let results = rt.block_on(service.search(&self.search)).unwrap();
         self.results = results;
     }
 
-    fn install_addon(&self, addon_id: i32, rt: &Runtime, service: &mut AddonService) {
+    fn install_addon(&self, addon_id: i32, rt: &Handle, service: &mut AddonService) {
         rt.block_on(service.install(addon_id, false)).unwrap();
     }
 }
@@ -30,7 +30,7 @@ impl View for Search {
         &mut self,
         _ctx: &egui::Context,
         ui: &mut egui::Ui,
-        rt: &Runtime,
+        rt: &Handle,
         service: &mut AddonService,
     ) {
         ui.horizontal(|ui| {

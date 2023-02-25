@@ -30,7 +30,7 @@ impl From<&DbAddon::Model> for SearchDbAddon {
     }
 }
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Default, Deserialize)]
 pub struct AddonDetails {
     pub id: i32,
     pub category_id: String,

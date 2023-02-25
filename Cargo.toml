@@ -14,7 +14,8 @@ auto_link_exclude_list = [
 ]
 
 [workspace]
-members = [".", "cli", "core", "entity", "migration"]
+members = [".", "core", "entity", "migration"]
+# members = [".", "cli", "core", "entity", "migration"]
 
 [[bin]]
 name = "eso-addon-manager"
@@ -28,3 +29,4 @@ strum = "0.24.1"
 strum_macros = "0.24.3"
 egui_file = "0.8.0"
 itertools = "0.10.5"
+lazy_async_promise = "0.3.1"

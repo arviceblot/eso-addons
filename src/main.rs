@@ -1,20 +1,22 @@
 use eframe::egui;
 use eso_addons_core::service::AddonService;
+use tokio::runtime::Handle;
 use tokio::runtime::{self, Runtime};
 use views::View;
 
 mod views;
 
-use views::browse::Browse;
+// use views::browse::Browse;
 use views::installed::Installed;
-use views::search::Search;
+// use views::search::Search;
 use views::settings::Settings;
 use views::ui_helpers::ViewOpt;
 
 const APP_NAME: &str = "ESO Addon Manager";
 pub const REPO: Option<&str> = option_env!("CARGO_PKG_REPOSITORY");
 
-fn main() -> Result<(), eframe::Error> {
+#[tokio::main]
+async fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(960.0, 600.0)),
         ..Default::default()
@@ -25,27 +27,24 @@ fn main() -> Result<(), eframe::Error> {
 struct EamApp {
     view: ViewOpt,
     installed_view: Installed,
-    search: Search,
+    // search: Search,
     settings: Settings,
-    browse: Browse,
-    rt: Runtime,
+    // browse: Browse,
     service: AddonService,
 }
 
 impl EamApp {
     pub fn new() -> EamApp {
-        let rt = runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
+        let rt = Handle::current();
+        let service = std::thread::spawn(move || rt.block_on(AddonService::new()))
+            .join()
             .unwrap();
-        let service = rt.block_on(AddonService::new());
         EamApp {
             view: ViewOpt::Installed,
             installed_view: Installed::new(),
-            search: Search::new(),
+            // search: Search::new(),
             settings: Settings::default(),
-            browse: Browse::default(),
-            rt,
+            // browse: Browse::default(),
             service,
         }
     }
@@ -68,17 +67,15 @@ impl eframe::App for EamApp {
 
             match self.view {
                 ViewOpt::Installed => {
-                    self.installed_view
-                        .get_installed_addons(&self.rt, &mut self.service);
-                    self.installed_view.ui(ctx, ui, &self.rt, &mut self.service);
+                    self.installed_view.ui(ctx, ui, &mut self.service);
                 }
                 ViewOpt::Search => {
-                    self.search.ui(ctx, ui, &self.rt, &mut self.service);
+                    // self.search.ui(ctx, ui, &self.rt, &mut self.service);
                 }
                 ViewOpt::Browse => {
-                    self.browse.ui(ctx, ui, &self.rt, &mut self.service);
+                    // self.browse.ui(ctx, ui, &self.rt, &mut self.service);
                 }
-                ViewOpt::Settings => self.settings.ui(ctx, ui, &self.rt, &mut self.service),
+                ViewOpt::Settings => self.settings.ui(ctx, ui, &mut self.service),
             }
         });
     }

@@ -1217,12 +1217,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
-name = "dotenv"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
-
-[[package]]
 name = "dotenvy"
 version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1456,29 +1450,10 @@ dependencies = [
  "egui_file",
  "eso-addons-core",
  "itertools",
+ "lazy_async_promise",
  "strum",
  "strum_macros",
  "tokio",
-]
-
-[[package]]
-name = "eso-addons"
-version = "0.1.0"
-dependencies = [
- "clap",
- "colored",
- "dirs",
- "dotenv",
- "entity",
- "eso-addons-core",
- "futures",
- "migration",
- "prettytable-rs",
- "requestty",
- "sea-orm",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1490,6 +1465,7 @@ dependencies = [
  "dirs",
  "entity",
  "hostname",
+ "lazy_async_promise",
  "migration",
  "prettytable-rs",
  "regex",
@@ -2221,6 +2197,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de8b303297635ad57c9f5059fd9cee7a47f8e8daa09df0fcd07dd39fb22977f"
 dependencies = [
  "log",
+]
+
+[[package]]
+name = "lazy_async_promise"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1e73c0f5d1ad10b2734f050beb4a274d4580954d505cca45e6945bf45547073"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
