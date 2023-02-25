@@ -71,7 +71,7 @@ impl UpdateCommand {
             return Ok(());
         }
 
-        let result = service.update().await?;
+        let result = service.update(true).await?;
 
         if result.addons_updated.is_empty() {
             println!("Everything up to date!");
@@ -79,6 +79,12 @@ impl UpdateCommand {
             for addon in result.addons_updated.iter() {
                 println!("{} Updated {}!", "✔".green(), addon.name);
             }
+        }
+        if self.ttc_pricetable && !result.ttc_updated {
+            println!("TTC PriceTable NOT updated!");
+        }
+        if result.ttc_updated {
+            println!("TTC PriceTable updated");
         }
 
         if !result.missing_deps.is_empty() {

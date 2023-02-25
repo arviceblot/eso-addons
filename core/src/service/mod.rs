@@ -165,7 +165,49 @@ impl AddonService {
         Ok(())
     }
 
-    pub async fn update(&mut self) -> Result<UpdateResult> {
+    pub async fn upgrade(&mut self) -> Result<UpdateResult> {
+        // update all addons that have a newer date than installed date
+        let updates = InstalledAddon::Entity::find()
+            .columns([
+                DbAddon::Column::Id,
+                DbAddon::Column::CategoryId,
+                DbAddon::Column::Name,
+            ])
+            .column_as(Expr::value(1), "installed")
+            .inner_join(DbAddon::Entity)
+            .filter(
+                Condition::any()
+                    .add(
+                        Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
+                            .less_than(Expr::tbl(DbAddon::Entity, DbAddon::Column::Date)),
+                    )
+                    .add(
+                        Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Version)
+                            .ne(Expr::tbl(DbAddon::Entity, DbAddon::Column::Version)),
+                    ),
+            )
+            .into_model::<AddonDetails>()
+            .all(&self.db)
+            .await
+            .context(error::DbGetSnafu)?;
+        for update in updates.iter() {
+            self.install(update.id, true).await.unwrap();
+        }
+        let need_installs = self.get_missing_dependency_options().await;
+
+        let mut result = UpdateResult {
+            missing_deps: need_installs,
+            ..Default::default()
+        };
+
+        if self.config.update_ttc_pricetable.unwrap_or(false) {
+            self.update_ttc_pricetable().await.unwrap();
+            result.ttc_updated = true;
+        }
+        Ok(result)
+    }
+
+    pub async fn update(&mut self, upgrade_all: bool) -> Result<UpdateResult> {
         // update endpoints from api
         self.api.update_endpoints().await.unwrap();
 
@@ -235,28 +277,13 @@ impl AddonService {
             .await
             .context(error::DbPutSnafu)?;
 
-        // update all addons that have a newer date than installed date
-        let updates = InstalledAddon::Entity::find()
-            .columns([
-                DbAddon::Column::Id,
-                DbAddon::Column::CategoryId,
-                DbAddon::Column::Name,
-            ])
-            .column_as(Expr::value(1), "installed")
-            .inner_join(DbAddon::Entity)
-            .filter(
-                Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
-                    .less_than(Expr::tbl(DbAddon::Entity, DbAddon::Column::Date)),
-            )
-            .into_model::<AddonDetails>()
-            .all(&self.db)
-            .await
-            .context(error::DbGetSnafu)?;
-        for update in updates.iter() {
-            self.install(update.id, true).await.unwrap();
+        let mut result = UpdateResult::default();
+        if upgrade_all {
+            result = self.upgrade().await.unwrap();
+        } else {
+            let need_installs = self.get_missing_dependency_options().await;
+            result.missing_deps = need_installs;
         }
-
-        let need_installs = self.get_missing_dependency_options().await;
 
         self.config.file_details = self.api.file_details_url.to_owned();
         self.config.file_list = self.api.file_list_url.to_owned();
@@ -265,10 +292,7 @@ impl AddonService {
 
         config::save_config(&self.config_filepath, &self.config).unwrap();
 
-        Ok(UpdateResult {
-            addons_updated: updates,
-            missing_deps: need_installs,
-        })
+        Ok(result)
     }
 
     async fn update_categories(&self) -> Result<()> {
@@ -362,23 +386,21 @@ impl AddonService {
         Ok(())
     }
 
-    pub async fn search(&self, search_string: &String) -> Result<Vec<SearchDbAddon>> {
-        let mut results = vec![];
+    pub async fn search(&self, search_string: &String) -> Result<Vec<AddonShowDetails>> {
+        // let mut results = vec![];
         let addons = DbAddon::Entity::find()
-            .find_also_related(InstalledAddon::Entity)
+            .column_as(InstalledAddon::Column::Version, "installed_version")
+            .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+            .column_as(Category::Column::Title, "category")
+            .inner_join(Category::Entity)
+            .left_join(InstalledAddon::Entity)
             .filter(DbAddon::Column::Name.like(format!("%{search_string}%").as_str()))
             .order_by_desc(DbAddon::Column::Date)
+            .into_model::<AddonShowDetails>()
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        for (addon, installed) in addons.iter() {
-            let mut search_addon: SearchDbAddon = addon.into();
-            if installed.is_some() {
-                search_addon.installed = true;
-            }
-            results.push(search_addon);
-        }
-        Ok(results)
+        Ok(addons)
     }
 
     pub async fn get_installed_addon_count(&self) -> Result<i32> {
@@ -392,6 +414,8 @@ impl AddonService {
     pub async fn get_installed_addons(&self) -> Result<Vec<AddonShowDetails>> {
         // let mut return_results = vec![];
         let results = DbAddon::Entity::find()
+            .column_as(DbAddon::Column::Version, "version")
+            .column_as(InstalledAddon::Column::Version, "installed_version")
             .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
             .column_as(Category::Column::Title, "category")
             .inner_join(Category::Entity)
@@ -592,7 +616,7 @@ impl AddonService {
 
         // If called on a new database, the main addon table will be empty. As a workaround, call `update()`.
         // TODO: remove update from here. Maybe depends on separating the update from upgrade with issue #49
-        self.update().await.unwrap();
+        self.update(false).await.unwrap();
 
         let line = fs::read_to_string(file).unwrap();
         let ids: Vec<i32> = line
@@ -603,5 +627,76 @@ impl AddonService {
         for addon_id in ids.iter() {
             self.install(*addon_id, false).await.unwrap();
         }
+    }
+
+    pub async fn get_category_parents(&self) -> Result<Vec<ParentCategory>> {
+        //SELECT
+        //     c.id,
+        //     title
+        // from category_parent p
+        // inner join category c on p.parent_id = c.id
+        // where parent_id <> 0
+        // group by parent_id
+
+        // select on Category instead
+        let parents = Category::Entity::find()
+            .join_rev(
+                JoinType::InnerJoin,
+                CategoryParent::Relation::Category2.def(),
+            )
+            .filter(CategoryParent::Column::ParentId.ne(0))
+            .order_by_asc(Category::Column::Id)
+            .group_by(CategoryParent::Column::ParentId)
+            .all(&self.db)
+            .await
+            .context(error::DbGetSnafu)
+            .unwrap();
+        let mut results: Vec<ParentCategory> = vec![];
+        for parent in parents.iter() {
+            let children = Category::Entity::find()
+                .join_rev(
+                    JoinType::InnerJoin,
+                    CategoryParent::Relation::Category1.def(),
+                )
+                .filter(CategoryParent::Column::ParentId.eq(parent.id))
+                .order_by_asc(Category::Column::Id)
+                .all(&self.db)
+                .await
+                .context(error::DbGetSnafu)
+                .unwrap();
+            results.push(ParentCategory {
+                id: parent.id,
+                title: parent.title.to_string(),
+                child_categories: children,
+            });
+        }
+        Ok(results)
+    }
+
+    pub async fn get_addons_by_category(&self, category_id: i32) -> Result<Vec<AddonShowDetails>> {
+        let mut addons = DbAddon::Entity::find()
+            .column_as(DbAddon::Column::Version, "version")
+            .column_as(InstalledAddon::Column::Version, "installed_version")
+            .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+            .column_as(Category::Column::Title, "category")
+            .inner_join(Category::Entity)
+            .join_rev(
+                JoinType::InnerJoin,
+                CategoryParent::Relation::Category1.def(),
+            )
+            .left_join(InstalledAddon::Entity)
+            .filter(
+                Condition::any()
+                    .add(Category::Column::Id.eq(category_id))
+                    .add(CategoryParent::Column::ParentId.eq(category_id)),
+            )
+            .group_by(DbAddon::Column::Id)
+            .into_model::<AddonShowDetails>()
+            .all(&self.db)
+            .await
+            .context(error::DbGetSnafu)
+            .unwrap();
+        addons.truncate(100);
+        Ok(addons)
     }
 }

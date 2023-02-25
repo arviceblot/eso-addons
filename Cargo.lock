@@ -1455,6 +1455,7 @@ dependencies = [
  "eframe",
  "egui_file",
  "eso-addons-core",
+ "itertools",
  "strum",
  "strum_macros",
  "tokio",
