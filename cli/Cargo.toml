@@ -10,7 +10,7 @@ name = "eso-addons"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "3.1.18", features = ["derive", "cargo"] }
+clap = { version = "4.1.6", features = ["derive", "cargo"] }
 dirs = "4.0"
 prettytable-rs = "^0.10"
 requestty = "0.3"
