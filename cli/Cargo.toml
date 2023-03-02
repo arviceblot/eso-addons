@@ -13,7 +13,7 @@ path = "src/main.rs"
 clap = { version = "3.1.18", features = ["derive", "cargo"] }
 dirs = "4.0"
 prettytable-rs = "^0.10"
-requestty = "0.3"
+requestty = "0.5"
 colored = "2"
 sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros", "debug-print" ] }
 futures = "0.3"
