@@ -213,7 +213,7 @@ enum CategoryParent {
 }
 
 #[derive(Iden)]
-enum AddonDetail {
+pub enum AddonDetail {
     Table,
     Id,
     Description,

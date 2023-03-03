@@ -2,6 +2,7 @@
 name = "eso-addon-manager"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
 
 [package.metadata.appimage]
@@ -13,7 +14,8 @@ auto_link_exclude_list = [
 ]
 
 [workspace]
-members = [".", "cli", "core", "entity", "migration"]
+members = [".", "core", "entity", "migration"]
+# members = [".", "cli", "core", "entity", "migration"]
 
 [[bin]]
 name = "eso-addon-manager"
@@ -26,3 +28,8 @@ eso-addons-core = { path = "./core" }
 strum = "0.24.1"
 strum_macros = "0.24.3"
 egui_file = "0.8.0"
+itertools = "0.10.5"
+lazy_async_promise = "0.3.1"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"
+dotenv = "0.15.0"

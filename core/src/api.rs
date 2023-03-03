@@ -13,7 +13,7 @@ use crate::error::{self, Result};
 const GLOBAL_CONFIG: &str = "globalconfig.json";
 const GAME_ID: &str = "ESO";
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct ApiClient {
     endpoint_url: String,
     pub client: reqwest::Client,
