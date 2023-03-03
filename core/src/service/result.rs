@@ -3,7 +3,7 @@ use entity::category::Model as Category;
 use sea_orm::FromQueryResult;
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Clone)]
 pub struct AddonDepOption {
     pub id: i32,
     pub name: String,
@@ -30,7 +30,7 @@ impl From<&DbAddon::Model> for SearchDbAddon {
     }
 }
 
-#[derive(FromQueryResult, Default, Deserialize)]
+#[derive(FromQueryResult, Default, Deserialize, Clone)]
 pub struct AddonDetails {
     pub id: i32,
     pub category_id: String,
@@ -39,7 +39,7 @@ pub struct AddonDetails {
     pub installed: bool,
 }
 
-#[derive(FromQueryResult, Clone)]
+#[derive(FromQueryResult, Clone, Default)]
 pub struct AddonShowDetails {
     pub id: i32,
     pub name: String,
@@ -55,6 +55,8 @@ pub struct AddonShowDetails {
     pub download: Option<String>,
     pub file_name: Option<String>,
     pub md5: Option<String>,
+    pub description: Option<String>,
+    pub change_log: Option<String>,
     // pub dirs: Vec<String>,
 }
 impl AddonShowDetails {
@@ -74,8 +76,17 @@ pub struct UpdateResult {
     pub missing_deps: Vec<AddonDepOption>,
     pub ttc_updated: bool,
 }
+impl Clone for UpdateResult {
+    fn clone(&self) -> Self {
+        Self {
+            addons_updated: self.addons_updated.to_vec(),
+            missing_deps: self.missing_deps.to_vec(),
+            ttc_updated: self.ttc_updated,
+        }
+    }
+}
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ParentCategory {
     pub id: i32,
     pub title: String,

@@ -1,20 +1,27 @@
+use std::collections::HashMap;
+use tracing::log::info;
+
 use eframe::{
     egui::{self, RichText, ScrollArea},
     epaint::Color32,
 };
-use eso_addons_core::service::{result::AddonShowDetails, AddonService};
-use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use eso_addons_core::service::{
+    result::{AddonShowDetails, UpdateResult},
+    AddonService,
+};
 use strum::IntoEnumIterator;
-use tokio::runtime::{Handle, Runtime};
 
 use super::{
-    ui_helpers::{ui_show_addon_item, Sort},
+    ui_helpers::{ui_show_addon_item, PromisedValue, Sort},
     View,
 };
 
 pub struct Installed {
-    addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
-    installed_addons: Option<Vec<AddonShowDetails>>,
+    // addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
+    installed_addons: PromisedValue<Vec<AddonShowDetails>>,
+    update_one: HashMap<i32, PromisedValue<()>>,
+    update: PromisedValue<UpdateResult>,
+    remove: PromisedValue<()>,
     displayed_addons: Vec<AddonShowDetails>,
     addons_updated: Vec<String>,
     filter: String,
@@ -27,15 +34,17 @@ pub struct Installed {
 impl Installed {
     pub fn new() -> Installed {
         Installed {
-            installed_addons: None,
+            installed_addons: PromisedValue::default(),
+            update: PromisedValue::default(),
+            remove: PromisedValue::default(),
+            update_one: HashMap::new(),
             displayed_addons: vec![],
             addons_updated: vec![],
             filter: Default::default(),
             sort: Sort::Name,
-            prev_sort: Sort::Name,
+            prev_sort: Sort::Id,
             init: true,
             editing: false,
-            addons_promise: None,
         }
     }
     fn show_init(&mut self) -> bool {
@@ -45,17 +54,66 @@ impl Installed {
         }
         init
     }
-    fn poll(&mut self) {
-        if self.addons_promise.is_some() {
-            let promise = self.addons_promise.as_mut().unwrap().poll_state();
-            if let ImmediateValueState::Success(val) = promise {
-                self.installed_addons = Some(val.to_vec()); // copy out of promise
-                self.addons_promise = None;
-                self.sort_addons();
+    fn poll(&mut self, service: &mut AddonService) {
+        self.update.poll();
+        if self.update.is_ready() && !self.installed_addons.is_polling() {
+            self.update.handle();
+            self.get_installed_addons(service);
+        }
+
+        self.installed_addons.poll();
+        if self.installed_addons.is_ready() {
+            self.installed_addons.handle();
+            // force sort as addons list may have updated
+            self.sort_addons();
+        }
+
+        self.remove.poll();
+        if self.remove.is_ready() {
+            self.remove.handle();
+            self.get_installed_addons(service);
+        }
+
+        let mut updated_addons = vec![];
+        for (addon_id, promise) in self.update_one.iter_mut() {
+            promise.poll();
+            if promise.is_ready() {
+                updated_addons.push(addon_id.to_owned());
+                promise.handle();
             }
         }
+        let fetch_addons = !updated_addons.is_empty();
+        for addon_id in updated_addons.iter() {
+            self.update_one.remove(addon_id);
+        }
+        if fetch_addons {
+            self.get_installed_addons(service);
+        }
+    }
+    fn is_updating_addon(&self, addon_id: i32) -> bool {
+        let promise = self.update_one.get(&addon_id);
+        if promise.is_some() && !promise.unwrap().is_ready() {
+            return true;
+        }
+        false
     }
     fn update_addons(&mut self, service: &mut AddonService) {
+        if !self.installed_addons.is_ready() {
+            return;
+        }
+        let update_ids = self
+            .installed_addons
+            .value
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|x| x.is_upgradable())
+            .map(|x| x.id);
+        for update_id in update_ids {
+            let mut promise = PromisedValue::<()>::default();
+            promise.set(service.install(update_id, true));
+            self.update_one.insert(update_id, promise);
+        }
         // let result = rt.block_on(service.upgrade()).unwrap();
         // for update in result.addons_updated.iter() {
         //     self.addons_updated
@@ -74,10 +132,17 @@ impl Installed {
         // self.get_installed_addons(rt, service);
     }
     pub fn get_installed_addons(&mut self, service: &mut AddonService) {
-        self.addons_promise = Some(service.get_installed_addons());
-        // let result = rt.block_on(service.get_installed_addons()).unwrap();
-        // self.installed_addons = result;
-        // self.sort_addons();
+        if self.installed_addons.is_polling() {
+            return;
+        }
+        info!("Getting installed addons");
+        self.installed_addons.set(service.get_installed_addons());
+    }
+
+    fn check_update(&mut self, service: &mut AddonService) {
+        // Check for updates but do not upgrade any addons
+        info!("Checking for updates");
+        self.update.set(service.update(false));
     }
     fn handle_sort(&mut self) {
         if self.prev_sort != self.sort {
@@ -86,9 +151,10 @@ impl Installed {
         }
     }
     fn sort_addons(&mut self) {
-        if self.installed_addons.is_some() {
-            self.displayed_addons = self.installed_addons.as_ref().unwrap().to_vec();
+        if self.installed_addons.value.as_ref().is_some() {
+            self.displayed_addons = self.installed_addons.value.as_ref().unwrap().to_vec();
         }
+        info!("Sorting addons");
         match self.sort {
             Sort::Author => self.displayed_addons.sort_unstable_by(|a, b| {
                 a.author_name
@@ -153,44 +219,45 @@ impl Installed {
             .sort_unstable_by_key(|b| std::cmp::Reverse(b.is_upgradable()));
     }
 
-    fn remove_addon(&self, addon_id: i32, rt: &Handle, service: &mut AddonService) {
-        rt.block_on(service.remove(addon_id)).unwrap();
+    fn remove_addon(&mut self, addon_id: i32, service: &mut AddonService) {
+        let mut promise = PromisedValue::<()>::default();
+        promise.set(service.remove(addon_id));
+        self.remove = promise;
+        // rt.block_on(service.remove(addon_id)).unwrap();
     }
 }
 impl View for Installed {
-    fn ui(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui, service: &mut AddonService) {
+    fn ui(
+        &mut self,
+        _ctx: &egui::Context,
+        ui: &mut egui::Ui,
+        service: &mut AddonService,
+    ) -> Option<i32> {
         if self.show_init() {
-            // TODO: move blocking install count out of update loop!
-            // rt.block_on(service.update(false)).unwrap();
-            // if service.config.update_on_launch.unwrap_or(false) {
-            //     rt.block_on(service.upgrade()).unwrap();
-            // }
-            self.get_installed_addons(service);
+            self.check_update(service);
         }
 
         // update promises
-        self.poll();
+        self.poll(service);
 
         // if we are loading addons, show spinner and that's it
-        if self.addons_promise.is_some() {
+        if self.installed_addons.is_polling() || self.update.is_polling() {
             ui.spinner();
-            return;
+            return None;
         }
 
-        if self.installed_addons.is_none() && self.addons_promise.is_none() {
-            ui.label("Something's not right! No promise and no addons!");
-        }
-        if self.installed_addons.is_none() {
-            return;
-        }
-        if self.installed_addons.as_ref().unwrap().is_empty() {
+        let mut return_id = None;
+        if !self.installed_addons.is_polling()
+            && self.installed_addons.value.as_ref().unwrap().is_empty()
+        {
             ui.label("No addons installed!");
         } else {
             self.handle_sort();
             ui.horizontal(|ui| {
-                if ui.button("Update All").clicked() {
-                    // TODO: move blocking update out of update loop!
-                    // self.update_addons(rt, service);
+                if !self.update_one.is_empty() {
+                    ui.add_enabled(false, egui::Button::new("Updating..."));
+                } else if ui.button("Update All").clicked() {
+                    self.update_addons(service);
                 }
                 egui::ComboBox::from_id_source("sort")
                     .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
@@ -213,7 +280,7 @@ impl View for Installed {
             ui.horizontal(|ui| {
                 ui.label(format!(
                     "Installed: {}",
-                    self.installed_addons.as_ref().unwrap().len()
+                    self.installed_addons.value.as_ref().unwrap().len()
                 ));
                 ui.checkbox(&mut self.editing, "Edit");
             });
@@ -237,26 +304,43 @@ impl View for Installed {
                                     }) {
                                         // col0 x button if editing
                                         if self.editing {
-                                            ui.horizontal_centered(|ui| {
-                                                if ui
-                                                    .button(RichText::new("🗙").color(Color32::RED))
-                                                    .clicked()
-                                                {
-                                                    remove_id = Some(addon.id);
-                                                }
-                                            });
+                                            if self.remove.is_polling() {
+                                                ui.spinner();
+                                            } else {
+                                                ui.horizontal_centered(|ui| {
+                                                    if ui
+                                                        .button(
+                                                            RichText::new("🗙").color(Color32::RED),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        remove_id = Some(addon.id);
+                                                    }
+                                                });
+                                            }
                                         }
-                                        ui_show_addon_item(ui, addon);
+                                        let addon_id = ui_show_addon_item(ui, addon).to_owned();
+                                        if addon_id.is_some() {
+                                            return_id = addon_id;
+                                        }
 
-                                        if addon.is_upgradable() && ui.button("Update").clicked() {
-                                            // rt.block_on(service.install(addon.id, true)).unwrap();
+                                        if addon.is_upgradable() {
+                                            if self.is_updating_addon(addon.id) {
+                                                ui.add_enabled(
+                                                    false,
+                                                    egui::Button::new("Updating..."),
+                                                );
+                                            } else if ui.button("Update").clicked() {
+                                                let mut promise = PromisedValue::<()>::default();
+                                                promise.set(service.install(addon.id, true));
+                                                self.update_one.insert(addon.id, promise);
+                                            }
                                         }
                                         ui.end_row();
                                     }
                                 });
                             if let Some(id) = remove_id {
-                                // self.remove_addon(id, rt, service);
-                                // self.get_installed_addons(rt, service);
+                                self.remove_addon(id, service);
                             }
                         });
                     });
@@ -276,5 +360,7 @@ impl View for Installed {
                 });
             });
         });
+
+        return_id
     }
 }

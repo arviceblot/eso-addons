@@ -27,7 +27,7 @@ fn default_dependency() -> bool {
 }
 
 // #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     // #[serde(rename = "addonDir")]
     pub addon_dir: PathBuf,
