@@ -1,6 +1,7 @@
 [package]
 name = "eso-addon-manager"
-version = "0.1.0"
+version = "0.4.0"
+authors = ["arviceblot <github@relay.arviceblot.com>", "Damian Czaja <trojan295@protonmail.com>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"

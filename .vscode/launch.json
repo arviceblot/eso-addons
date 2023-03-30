@@ -102,30 +102,19 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Tauri Development Debug",
+            "name": "Debug executable 'eso-addon-manager'",
             "cargo": {
                 "args": [
                     "build",
-                    "--manifest-path=./src-tauri/Cargo.toml",
-                    "--no-default-features"
-                ]
+                    "--bin=eso-addon-manager",
+                    "--package=eso-addon-manager"
+                ],
+                "filter": {
+                    "name": "eso-addon-manager",
+                    "kind": "bin"
+                }
             },
-            // task for the `beforeDevCommand` if used, must be configured in `.vscode/tasks.json`
-            "preLaunchTask": "ui:dev"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Tauri Production Debug",
-            "cargo": {
-                "args": [
-                    "build",
-                    "--release",
-                    "--manifest-path=./src-tauri/Cargo.toml"
-                ]
-            },
-            // task for the `beforeBuildCommand` if used, must be configured in `.vscode/tasks.json`
-            "preLaunchTask": "ui:build"
-        },
+            "cwd": "${workspaceFolder}"
+        }
     ]
 }

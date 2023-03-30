@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use tracing::log::info;
 
 use eframe::{
@@ -16,14 +16,19 @@ use super::{
     View,
 };
 
+const DETAIL_BUFF_SIZE: usize = 20;
+
 pub struct Installed {
     // addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     update_one: HashMap<i32, PromisedValue<()>>,
     update: PromisedValue<UpdateResult>,
     remove: PromisedValue<()>,
+    update_details_q: VecDeque<i32>,
+    update_details: HashMap<i32, PromisedValue<()>>,
+    ttc_pricetable: PromisedValue<()>,
     displayed_addons: Vec<AddonShowDetails>,
-    addons_updated: Vec<String>,
+    log: Vec<String>,
     filter: String,
     sort: Sort,
     prev_sort: Sort,
@@ -37,9 +42,12 @@ impl Installed {
             installed_addons: PromisedValue::default(),
             update: PromisedValue::default(),
             remove: PromisedValue::default(),
+            update_details_q: VecDeque::new(),
+            update_details: HashMap::with_capacity(DETAIL_BUFF_SIZE),
+            ttc_pricetable: PromisedValue::default(),
             update_one: HashMap::new(),
             displayed_addons: vec![],
-            addons_updated: vec![],
+            log: vec![],
             filter: Default::default(),
             sort: Sort::Name,
             prev_sort: Sort::Id,
@@ -58,8 +66,20 @@ impl Installed {
         self.update.poll();
         if self.update.is_ready() && !self.installed_addons.is_polling() {
             self.update.handle();
+            if self.update.value.is_some() {
+                self.update_details_q =
+                    VecDeque::from(self.update.value.as_ref().unwrap().missing_details.to_vec());
+            }
+            self.log.push("Updated addon list.".to_string());
             self.get_installed_addons(service);
         }
+        self.ttc_pricetable.poll();
+        if self.ttc_pricetable.is_ready() {
+            self.log.push("Updated TTC PriceTable.".to_string());
+            self.ttc_pricetable.handle();
+        }
+
+        self.update_addon_details(service);
 
         self.installed_addons.poll();
         if self.installed_addons.is_ready() {
@@ -90,6 +110,36 @@ impl Installed {
             self.get_installed_addons(service);
         }
     }
+    fn update_addon_details(&mut self, service: &mut AddonService) {
+        if self.update_details.is_empty() && self.update_details_q.is_empty() {
+            return;
+        }
+
+        // update promises
+        let mut updated_details = vec![];
+        for (addon_id, promise) in self.update_details.iter_mut() {
+            promise.poll();
+            if promise.is_ready() {
+                updated_details.push(addon_id.to_owned());
+                promise.handle();
+            }
+        }
+        for addon_id in updated_details.iter() {
+            self.update_details.remove(addon_id);
+        }
+
+        // queue up more details
+        while self.update_details.len() < DETAIL_BUFF_SIZE {
+            if self.update_details_q.is_empty() {
+                break;
+            }
+            // populate detail buffer
+            let addon_id = self.update_details_q.pop_front().unwrap();
+            let mut promise = PromisedValue::<()>::default();
+            promise.set(service.update_addon_details(addon_id));
+            self.update_details.insert(addon_id, promise);
+        }
+    }
     fn is_updating_addon(&self, addon_id: i32) -> bool {
         let promise = self.update_one.get(&addon_id);
         if promise.is_some() && !promise.unwrap().is_ready() {
@@ -98,7 +148,7 @@ impl Installed {
         false
     }
     fn update_addons(&mut self, service: &mut AddonService) {
-        if !self.installed_addons.is_ready() {
+        if self.installed_addons.is_polling() {
             return;
         }
         let update_ids = self
@@ -114,22 +164,6 @@ impl Installed {
             promise.set(service.install(update_id, true));
             self.update_one.insert(update_id, promise);
         }
-        // let result = rt.block_on(service.upgrade()).unwrap();
-        // for update in result.addons_updated.iter() {
-        //     self.addons_updated
-        //         .push(format!("{} updated!", update.name));
-        // }
-        // if result.addons_updated.is_empty() {
-        //     self.addons_updated
-        //         .push("Everything up to date!".to_string());
-        // }
-
-        // if service.config.update_ttc_pricetable.unwrap_or(false) {
-        //     rt.block_on(service.update_ttc_pricetable()).unwrap();
-        //     self.addons_updated
-        //         .push("TTC PriceTable Updated!".to_string());
-        // }
-        // self.get_installed_addons(rt, service);
     }
     pub fn get_installed_addons(&mut self, service: &mut AddonService) {
         if self.installed_addons.is_polling() {
@@ -143,6 +177,10 @@ impl Installed {
         // Check for updates but do not upgrade any addons
         info!("Checking for updates");
         self.update.set(service.update(false));
+        // check update TTC PriceTable
+        if service.config.update_ttc_pricetable.unwrap_or(false) {
+            self.ttc_pricetable.set(service.update_ttc_pricetable());
+        }
     }
     fn handle_sort(&mut self) {
         if self.prev_sort != self.sort {
@@ -353,7 +391,7 @@ impl View for Installed {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ScrollArea::vertical().max_height(20.0).show(ui, |ui| {
                     ui.vertical(|ui| {
-                        for update in self.addons_updated.iter() {
+                        for update in self.log.iter() {
                             ui.label(update);
                         }
                     });

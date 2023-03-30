@@ -1,9 +1,6 @@
 use dotenv::dotenv;
 use eframe::egui;
-use eso_addons_core::api::ApiClient;
 use eso_addons_core::service::AddonService;
-use tokio::runtime::Handle;
-use tokio::runtime::{self, Runtime};
 use views::View;
 
 mod views;
@@ -106,13 +103,6 @@ impl eframe::App for EamApp {
                 ui.spinner();
                 return;
             }
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
-                ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
-                ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
-                ui.selectable_value(&mut self.view, ViewOpt::Settings, "Settings");
-            });
-            ui.separator();
 
             if self.selected_addon.is_some() {
                 // show addon details view
@@ -125,6 +115,13 @@ impl eframe::App for EamApp {
                 return;
             }
 
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
+                ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
+                ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
+                ui.selectable_value(&mut self.view, ViewOpt::Settings, "Settings");
+            });
+            ui.separator();
             self.check_view_update();
 
             let addon_id: Option<i32> = match self.view {

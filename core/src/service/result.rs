@@ -74,14 +74,14 @@ impl AddonShowDetails {
 pub struct UpdateResult {
     pub addons_updated: Vec<AddonDetails>,
     pub missing_deps: Vec<AddonDepOption>,
-    pub ttc_updated: bool,
+    pub missing_details: Vec<i32>,
 }
 impl Clone for UpdateResult {
     fn clone(&self) -> Self {
         Self {
             addons_updated: self.addons_updated.to_vec(),
             missing_deps: self.missing_deps.to_vec(),
-            ttc_updated: self.ttc_updated,
+            missing_details: self.missing_details.to_vec(),
         }
     }
 }
