@@ -34,6 +34,13 @@ jobs:
           override: true
           profile: minimal
 
+      - name: Install packages
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt install libssl-dev
+          fi
+        shell: bash
+
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
@@ -77,16 +84,20 @@ jobs:
 
       - name: Install packages
         run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt install libssl-dev
+          fi
           cargo install cargo-appimage
+        shell: bash
 
       - name: Install appimagetool
         run: |
           wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
           chmod a+x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
-          sudo mv squashfs-root/usr/bin/appimagetool /usr/bin
+          chmod 755 squashfs-root/usr/bin/*
+          sudo mv squashfs-root/usr/bin/* /usr/bin
           sudo mv squashfs-root/usr/lib/appimagekit /usr/lib/appimagekit
-          sudo chmod 755 /usr/bin/appimagetool
           sudo chmod 755 /usr/lib/appimagekit/mksquashfs
           rm -rf squashfs-root/
           rm appimagetool-x86_64.AppImage
