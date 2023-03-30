@@ -2,8 +2,8 @@ on:
   push:
     tags:
       - "v*"
-    paths:
-      - '.github/workflows/release.yml'
+    branches:
+      - master
 
 name: Create Release
 env:
