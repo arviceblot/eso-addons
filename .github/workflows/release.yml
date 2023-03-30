@@ -5,7 +5,7 @@ on:
 
 name: Create Release
 env:
-  PROJECT_NAME: ${{ github.event.repository.name }}
+  PROJECT_NAME: eso-addon-manager
 
 jobs:
   build:
@@ -32,6 +32,11 @@ jobs:
           override: true
           profile: minimal
 
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install libssl-dev
+
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
@@ -52,11 +57,44 @@ jobs:
           origin="$(find target/${{ matrix.target }}/release -maxdepth 1 -perm -111 -iname "${{ env.PROJECT_NAME }}*")"
           dest="${origin/${{ env.PROJECT_NAME}}/${{ env.PROJECT_NAME}}-${{ matrix.target}}}"
           mv "$origin" "$dest"
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v2
         with:
           name: ${{ matrix.target }}
           path: ./target/${{ matrix.target }}/release/${{ env.PROJECT_NAME }}-${{ matrix.target }}*
+
+  build_appimage:
+    name: Build AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install Rust toolchain "${{ matrix.target }}"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+          profile: minimal
+
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install libssl-dev
+          cargo install cargo-appimage
+
+      - name: Build binary "${{ matrix.target }}"
+        uses: actions-rs/cargo@v1
+        with:
+          command: appimage
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.target }}
+          path: "*.AppImage"
 
   release_and_publish:
     name: Create release and publish
