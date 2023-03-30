@@ -98,7 +98,7 @@ jobs:
 
   release_and_publish:
     name: Create release and publish
-    needs: [build]
+    needs: [build, build_appimage]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
