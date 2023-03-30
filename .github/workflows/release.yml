@@ -2,6 +2,8 @@ on:
   push:
     tags:
       - "v*"
+    paths:
+      - '.github/workflows/release.yml'
 
 name: Create Release
 env:
@@ -71,13 +73,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Install Rust toolchain "${{ matrix.target }}"
+      - name: Install latest rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }}
+          default: true
           override: true
-          profile: minimal
 
       - name: Install packages
         run: |
@@ -85,7 +86,17 @@ jobs:
           sudo apt install libssl-dev
           cargo install cargo-appimage
 
-      - name: Build binary "${{ matrix.target }}"
+      - name: Install appimagetool
+        run: |
+          wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+          chmod a+x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          mv squashfs-root/usr/bin/appimagetool /usr/bin
+          chmod 755 /usr/bin/appimagetool
+          rm -rf squashfs-root/
+          rm appimagetool-x86_64.AppImage
+
+      - name: Build binary
         uses: actions-rs/cargo@v1
         with:
           command: appimage
@@ -93,8 +104,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ matrix.target }}
-          path: "*.AppImage"
+          path: "${{ env.PROJECT_NAME }}*.AppImage"
 
   release_and_publish:
     name: Create release and publish
