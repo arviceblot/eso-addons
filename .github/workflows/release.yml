@@ -34,11 +34,6 @@ jobs:
           override: true
           profile: minimal
 
-      - name: Install packages
-        run: |
-          sudo apt update
-          sudo apt install libssl-dev
-
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
@@ -82,8 +77,6 @@ jobs:
 
       - name: Install packages
         run: |
-          sudo apt update
-          sudo apt install libssl-dev
           cargo install cargo-appimage
 
       - name: Install appimagetool
