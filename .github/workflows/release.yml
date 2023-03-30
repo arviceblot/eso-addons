@@ -92,7 +92,9 @@ jobs:
           chmod a+x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
           sudo mv squashfs-root/usr/bin/appimagetool /usr/bin
+          sudo mv squashfs-root/usr/lib/appimagekit /usr/lib/appimagekit
           sudo chmod 755 /usr/bin/appimagetool
+          sudo chmod 755 /usr/lib/appimagekit/mksquashfs
           rm -rf squashfs-root/
           rm appimagetool-x86_64.AppImage
 
