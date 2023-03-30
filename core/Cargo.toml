@@ -26,6 +26,6 @@ hostname = "^0.3"
 sea-orm = { version = "^0", features = [ "sqlx-sqlite", "runtime-tokio-rustls", "macros" ] }
 migration = { path = "../migration" }
 entity = { path = "../entity" }
-chrono = "0.4.23"
+chrono = "0.4.24"
 tracing = "0.1.37"
 lazy_async_promise = "0.4.0"
