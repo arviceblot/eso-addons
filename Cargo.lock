@@ -1450,7 +1450,7 @@ dependencies = [
 
 [[package]]
 name = "eso-addon-manager"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "dotenv",
  "eframe",

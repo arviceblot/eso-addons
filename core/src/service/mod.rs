@@ -23,7 +23,6 @@ use sea_orm::{
 use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
-use std::time::Duration;
 use tempfile::NamedTempFile;
 use tracing::log::{self, info};
 use zip::ZipArchive;
@@ -96,9 +95,15 @@ impl AddonService {
 
             if let Some(installed_entry) = installed_entry {
                 if installed_entry.version == entry.version && !update {
-                    println!("Addon {} is already installed and up to date", entry.name);
+                    info!("Addon {} is already installed and up to date", entry.name);
                     return Ok(());
                 }
+            }
+
+            if update {
+                info!("Updating addon: {}", addon_id);
+            } else {
+                info!("Installing addon: {}", addon_id);
             }
 
             let installed = service
@@ -110,8 +115,6 @@ impl AddonService {
                 version: ActiveValue::Set(entry.version.to_string()),
                 date: ActiveValue::Set(entry.date.to_string()),
             };
-            let entry: DbAddon::ActiveModel = entry.into();
-            entry.update(&service.db).await.unwrap();
 
             InstalledAddon::Entity::insert(installed_entry)
                 .on_conflict(
@@ -185,10 +188,6 @@ impl AddonService {
             ..Default::default()
         };
 
-        if self.config.update_ttc_pricetable.unwrap_or(false) {
-            self.update_ttc_pricetable().await.unwrap();
-            result.ttc_updated = true;
-        }
         Ok(result)
     }
 
@@ -273,8 +272,8 @@ impl AddonService {
                 result.missing_deps = need_installs;
             }
 
-            // update addon details where we have the older version
-            service.update_addon_details().await?;
+            // find addon details where we have the older version
+            result.missing_details = service.get_missing_addon_detail_ids().await?;
 
             info!("Saving config");
             service.config.file_details = service.api.file_details_url.to_owned();
@@ -288,11 +287,10 @@ impl AddonService {
         })
     }
 
-    async fn update_addon_details(&self) -> Result<()> {
-        info!("Updating addon details");
-        // TODO: consider promising file_detail results to grab them in parallel. Initial load can take a long time
-        // get addons where we don't have details or they may be out of date
-        let results = DbAddon::Entity::find()
+    async fn get_missing_addon_detail_ids(&self) -> Result<Vec<i32>> {
+        let mut results = vec![];
+        info!("Getting addons with missing or outdated details");
+        let addons = DbAddon::Entity::find()
             .left_join(AddonDetail::Entity)
             .filter(
                 Condition::any()
@@ -309,43 +307,52 @@ impl AddonService {
             .all(&self.db)
             .await
             .context(error::DbPutSnafu)?;
-        if results.is_empty() {
-            return Ok(());
+        if addons.is_empty() {
+            return Ok(results);
         }
+        results = addons.iter().map(|x| x.id).collect();
+        Ok(results)
+    }
 
-        let mut insert_details = vec![];
-        for addon in results.iter() {
-            let file_details = self.api.get_file_details(addon.id).await?;
+    pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Updating addon details for addon: {}", id);
+
+            let file_details = service.api.get_file_details(id).await?;
             let record = AddonDetail::ActiveModel {
-                id: ActiveValue::Set(addon.id),
+                id: ActiveValue::Set(id),
                 description: ActiveValue::Set(Some(file_details.description)),
                 change_log: ActiveValue::Set(Some(file_details.change_log)),
                 version: ActiveValue::Set(Some(file_details.version)),
             };
-            insert_details.push(record);
 
-            let mut active: DbAddon::ActiveModel = addon.to_owned().into_active_model();
+            let addon = DbAddon::Entity::find_by_id(id).one(&service.db).await?;
+            let mut active: DbAddon::ActiveModel = addon.unwrap().into_active_model();
             active.md5 = Set(Some(file_details.md5.to_owned()));
             active.file_name = Set(Some(file_details.file_name.to_owned()));
             active.download = Set(Some(file_details.download_url.to_owned()));
-            active.update(&self.db).await.context(error::DbPutSnafu)?;
-        }
+            active
+                .update(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
 
-        AddonDetail::Entity::insert_many(insert_details)
-            .on_conflict(
-                OnConflict::column(AddonDetail::Column::Id)
-                    .update_columns([
-                        AddonDetail::Column::Description,
-                        AddonDetail::Column::ChangeLog,
-                        AddonDetail::Column::Version,
-                    ])
-                    .to_owned(),
-            )
-            .exec(&self.db)
-            .await
-            .context(error::DbPutSnafu)?;
+            AddonDetail::Entity::insert(record)
+                .on_conflict(
+                    OnConflict::column(AddonDetail::Column::Id)
+                        .update_columns([
+                            AddonDetail::Column::Description,
+                            AddonDetail::Column::ChangeLog,
+                            AddonDetail::Column::Version,
+                        ])
+                        .to_owned(),
+                )
+                .exec(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
 
-        Ok(())
+            Ok(())
+        })
     }
 
     async fn update_categories(&self) -> Result<()> {
@@ -498,7 +505,8 @@ impl AddonService {
 
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
         info!("Checking for missing dependencies");
-        let need_installs = InstalledAddon::Entity::find()
+
+        InstalledAddon::Entity::find()
             .columns([DbAddon::Column::Id, DbAddon::Column::Name])
             .column(AddonDir::Column::Dir)
             .join(JoinType::InnerJoin, InstalledAddon::Relation::Addon.def())
@@ -531,9 +539,7 @@ impl AddonService {
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)
-            .unwrap();
-
-        need_installs
+            .unwrap()
     }
 
     pub fn get_addon_details(
@@ -646,11 +652,16 @@ impl AddonService {
         Ok(addon.unwrap())
     }
 
-    pub async fn update_ttc_pricetable(&self) -> Result<()> {
-        self.base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"))
-            .await
-            .unwrap();
-        Ok(())
+    pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Updating TTC PriceTable");
+            service
+                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"))
+                .await
+                .unwrap();
+            Ok(())
+        })
     }
 
     pub fn save_config(&self) {

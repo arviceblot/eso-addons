@@ -1,4 +1,5 @@
 use std::fmt;
+use tracing::log::error;
 
 use eframe::{
     egui::{self, RichText},
@@ -62,7 +63,7 @@ impl<T: Send + Clone + Default> PromisedValue<T> {
                 self.promise = None;
             }
             ImmediateValueState::Error(e) => {
-                println!("{}", format!("Error fetching post: {}", **e));
+                error!("{}", format!("Error fetching post: {}", **e));
             }
             _ => {}
         }

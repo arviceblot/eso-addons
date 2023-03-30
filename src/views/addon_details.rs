@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::{
     ui_helpers::{ui_show_addon_item, PromisedValue},
     View,
