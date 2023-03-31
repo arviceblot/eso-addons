@@ -16,11 +16,11 @@ use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, EntityTrait,
-    IntoActiveModel, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-    RelationTrait, Set,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbErr,
+    EntityTrait, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait, Set,
 };
-use snafu::ResultExt;
+use snafu::{ensure, ResultExt};
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -166,12 +166,12 @@ impl AddonService {
             .filter(
                 Condition::any()
                     .add(
-                        Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Date)
-                            .less_than(Expr::tbl(DbAddon::Entity, DbAddon::Column::Date)),
+                        Expr::col((InstalledAddon::Entity, InstalledAddon::Column::Date))
+                            .lt(Expr::col((DbAddon::Entity, DbAddon::Column::Date))),
                     )
                     .add(
-                        Expr::tbl(InstalledAddon::Entity, InstalledAddon::Column::Version)
-                            .ne(Expr::tbl(DbAddon::Entity, DbAddon::Column::Version)),
+                        Expr::col((InstalledAddon::Entity, InstalledAddon::Column::Version))
+                            .ne(Expr::col((DbAddon::Entity, DbAddon::Column::Version))),
                     ),
             )
             .into_model::<AddonDetails>()
@@ -296,8 +296,10 @@ impl AddonService {
                 Condition::any()
                     .add(AddonDetail::Column::Version.is_null())
                     .add(
-                        Expr::tbl(DbAddon::Entity, DbAddon::Column::Version)
-                            .ne(Expr::tbl(AddonDetail::Entity, AddonDetail::Column::Version)),
+                        Expr::col((DbAddon::Entity, DbAddon::Column::Version)).ne(Expr::col((
+                            AddonDetail::Entity,
+                            AddonDetail::Column::Version,
+                        ))),
                     )
                     .add(DbAddon::Column::Md5.is_null())
                     .add(DbAddon::Column::FileName.is_null())
@@ -377,7 +379,7 @@ impl AddonService {
                 category_parents.push(db_parent);
             }
         }
-        Category::Entity::insert_many(insert_categories)
+        let result = Category::Entity::insert_many(insert_categories)
             .on_conflict(
                 OnConflict::column(Category::Column::Id)
                     .update_columns([
@@ -388,17 +390,26 @@ impl AddonService {
                     .to_owned(),
             )
             .exec(&self.db)
-            .await
-            .context(error::DbPutSnafu)?;
-        CategoryParent::Entity::insert_many(category_parents)
+            .await;
+        ensure!(
+            result.is_ok() || result.err().unwrap() != DbErr::RecordNotInserted,
+            error::NonRecordNotInsertedSnafu
+        );
+        let result = CategoryParent::Entity::insert_many(category_parents)
             .on_conflict(
                 OnConflict::columns([CategoryParent::Column::Id, CategoryParent::Column::ParentId])
                     .do_nothing()
                     .to_owned(),
             )
             .exec(&self.db)
-            .await
-            .context(error::DbPutSnafu)?;
+            .await;
+        // for some reason the ensure check for the previous Category insert result check doesn't work here
+        match result {
+            Ok(r) => Ok(Some(r)),
+            Err(DbErr::RecordNotInserted) => Ok(None),
+            Err(e) => Err(e),
+        }
+        .unwrap();
         Ok(())
     }
 
@@ -525,10 +536,10 @@ impl AddonService {
                             .from(AddonDir::Entity)
                             .inner_join(
                                 InstalledAddon::Entity,
-                                Expr::tbl(AddonDir::Entity, AddonDir::Column::AddonId).equals(
+                                Expr::col((AddonDir::Entity, AddonDir::Column::AddonId)).equals((
                                     InstalledAddon::Entity,
                                     InstalledAddon::Column::AddonId,
-                                ),
+                                )),
                             )
                             .to_owned(),
                     ),

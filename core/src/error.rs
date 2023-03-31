@@ -32,9 +32,14 @@ pub enum Error {
     DbGet { source: sea_orm::DbErr },
 
     #[snafu(display("DbPut error: {}", source))]
-    DbPut {
+    DbPutError {
         source: sea_orm::DbErr,
         backtrace: Backtrace,
+    },
+
+    #[snafu(display("DbPut error but not NonRecordNotInserted"))]
+    NonRecordNotInserted {
+        // backtrace: Backtrace
     },
 
     #[snafu(display("DbDelete error: {}", source))]
