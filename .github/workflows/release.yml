@@ -76,6 +76,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt install zsync
+          cargo install cargo-appimage
 
       - name: Install appimagetool
         run: |
