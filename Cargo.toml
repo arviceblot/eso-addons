@@ -13,6 +13,10 @@ auto_link_exclude_list = [
     "libdl.so*",
     "libpthread.so*",
 ]
+args = [
+    "-u",
+    "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync"
+]
 
 [workspace]
 members = [".", "core", "entity", "migration"]
