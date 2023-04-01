@@ -32,13 +32,6 @@ jobs:
           override: true
           profile: minimal
 
-      - name: Install packages
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt install libssl-dev
-          fi
-        shell: bash
-
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
@@ -82,11 +75,7 @@ jobs:
 
       - name: Install packages
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt install libssl-dev
-          fi
-          cargo install cargo-appimage
-        shell: bash
+          sudo apt install zsync
 
       - name: Install appimagetool
         run: |
@@ -108,7 +97,9 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v2
         with:
-          path: "${{ env.PROJECT_NAME }}*.AppImage"
+          path: |
+            ${{ env.PROJECT_NAME }}*.AppImage
+            ${{ env.PROJECT_NAME }}*.zsync
 
   release_and_publish:
     name: Create release and publish
