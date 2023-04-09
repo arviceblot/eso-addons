@@ -9,7 +9,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online designed
 - GUI and CLI options
 - Install, remove, and search addons from [esoui.com](https://www.esoui.com)
 - Cross-platform support for Linux, macOS, and Windows
-- Specific support for ESO on the Steam Deck through Flathub
+- Specific support for ESO on the Steam Deck through AppImage
 - Option to update Tamriel Trade Centre prices
 - No Java!
 - Import managed addons from Minion
