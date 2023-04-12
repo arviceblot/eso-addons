@@ -20,7 +20,7 @@ use sea_orm::{
     EntityTrait, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, RelationTrait, Set,
 };
-use snafu::{ensure, ResultExt};
+use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -29,6 +29,8 @@ use zip::ZipArchive;
 
 use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
+
+use bbcode_tagger::{BBCode, BBTree};
 
 mod fs_util;
 pub mod result;
@@ -116,7 +118,7 @@ impl AddonService {
                 date: ActiveValue::Set(entry.date.to_string()),
             };
 
-            InstalledAddon::Entity::insert(installed_entry)
+            let result = InstalledAddon::Entity::insert(installed_entry)
                 .on_conflict(
                     OnConflict::column(InstalledAddon::Column::AddonId)
                         .update_columns([
@@ -126,8 +128,8 @@ impl AddonService {
                         .to_owned(),
                 )
                 .exec(&service.db)
-                .await
-                .context(error::DbPutSnafu)?;
+                .await;
+            check_db_result(result)?;
 
             // get addon IDs from dependency dirs, there may be more than on for each directory
             if !installed.depends_on.is_empty() {
@@ -136,7 +138,7 @@ impl AddonService {
                     dependency_dir: ActiveValue::Set(x.to_owned()),
                 });
                 // insert all dependencies
-                AddonDep::Entity::insert_many(deps)
+                let result = AddonDep::Entity::insert_many(deps)
                     .on_conflict(
                         OnConflict::columns([
                             AddonDep::Column::AddonId,
@@ -146,8 +148,8 @@ impl AddonService {
                         .to_owned(),
                     )
                     .exec(&service.db)
-                    .await
-                    .context(error::DbPutSnafu)?;
+                    .await;
+                check_db_result(result)?;
             }
             Ok(())
         })
@@ -391,10 +393,7 @@ impl AddonService {
             )
             .exec(&self.db)
             .await;
-        ensure!(
-            result.is_ok() || result.err().unwrap() != DbErr::RecordNotInserted,
-            error::NonRecordNotInsertedSnafu
-        );
+        check_db_result(result)?;
         let result = CategoryParent::Entity::insert_many(category_parents)
             .on_conflict(
                 OnConflict::columns([CategoryParent::Column::Id, CategoryParent::Column::ParentId])
@@ -404,12 +403,7 @@ impl AddonService {
             .exec(&self.db)
             .await;
         // for some reason the ensure check for the previous Category insert result check doesn't work here
-        match result {
-            Ok(r) => Ok(Some(r)),
-            Err(DbErr::RecordNotInserted) => Ok(None),
-            Err(e) => Err(e),
-        }
-        .unwrap();
+        check_db_result(result)?;
         Ok(())
     }
 
@@ -573,6 +567,14 @@ impl AddonService {
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();
+            Ok(result)
+        })
+    }
+
+    pub fn parse_bbcode(&self, text: String) -> ImmediateValuePromise<BBTree> {
+        ImmediateValuePromise::new(async move {
+            let parser = BBCode::default();
+            let result = parser.parse(&text);
             Ok(result)
         })
     }
@@ -791,4 +793,16 @@ impl AddonService {
             Ok(addons)
         })
     }
+}
+
+/// Use for inserts where no updates/inserts OK
+/// sea_orm now returns DbErr::RecordNotInserted when no inserts
+fn check_db_result<T>(result: Result<T, DbErr>) -> Result<()> {
+    match result {
+        Ok(r) => Ok(Some(r)),
+        Err(DbErr::RecordNotInserted) => Ok(None),
+        Err(e) => Err(e),
+    }
+    .unwrap();
+    Ok(())
 }
