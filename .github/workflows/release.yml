@@ -76,7 +76,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt install zsync
-          cargo install --git https://github.com/arviceblot/cargo-appimage.git
+          cargo install cargo-appimage
 
       - name: Install appimagetool
         run: |
