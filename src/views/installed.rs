@@ -100,6 +100,7 @@ impl Installed {
             if promise.is_ready() {
                 updated_addons.push(addon_id.to_owned());
                 promise.handle();
+                self.log.push(format!("Updated addon: {addon_id}"));
             }
         }
         let fetch_addons = !updated_addons.is_empty();
@@ -122,6 +123,7 @@ impl Installed {
             if promise.is_ready() {
                 updated_details.push(addon_id.to_owned());
                 promise.handle();
+                self.log.push(format!("Updated addon details: {addon_id}"));
             }
         }
         for addon_id in updated_details.iter() {
@@ -386,18 +388,23 @@ impl View for Installed {
             ui.separator();
         }
         // log scroll area
-        ui.collapsing("Log", |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ScrollArea::vertical().max_height(20.0).show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        for update in self.log.iter() {
-                            ui.label(update);
-                        }
-                    });
-                });
+        egui::CollapsingHeader::new("Log")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ScrollArea::vertical()
+                        .max_height(20.0)
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                for update in self.log.iter() {
+                                    ui.label(update);
+                                }
+                            });
+                        });
+                })
             });
-        });
 
         return_id
     }
