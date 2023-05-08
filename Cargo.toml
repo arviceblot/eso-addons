@@ -32,7 +32,7 @@ tokio = { version = "1", features = ["full"] }
 eso-addons-core = { path = "./core" }
 strum = "0.24.1"
 strum_macros = "0.24.3"
-egui_file = "0.8.0"
+egui_file = "0.8.2"
 itertools = "0.10.5"
 lazy_async_promise = "0.4.0"
 tracing = "0.1.37"
