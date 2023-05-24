@@ -2,12 +2,32 @@ use entity::addon as DbAddon;
 use entity::category::Model as Category;
 use sea_orm::FromQueryResult;
 use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub type AddonMap = HashMap<i32, String>;
 
 #[derive(FromQueryResult, Clone)]
 pub struct AddonDepOption {
-    pub id: i32,
-    pub name: String,
-    pub dir: String,
+    pub missing_dir: String,
+    pub required_by: String,
+    pub option_id: Option<i32>,
+    pub option_name: Option<String>,
+}
+
+#[derive(Default)]
+pub struct MissingDepView {
+    pub required_by: String,
+    pub options: HashMap<i32, String>,
+    pub ignore: bool,
+    pub satisfied_by: Option<i32>,
+}
+impl MissingDepView {
+    pub fn new(required_by: String) -> Self {
+        Self {
+            required_by,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -22,7 +22,7 @@ pub struct Installed {
     // addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     update_one: HashMap<i32, PromisedValue<()>>,
-    update: PromisedValue<UpdateResult>,
+    pub update: PromisedValue<UpdateResult>,
     remove: PromisedValue<()>,
     update_details_q: VecDeque<i32>,
     update_details: HashMap<i32, PromisedValue<()>>,
@@ -180,7 +180,7 @@ impl Installed {
         info!("Checking for updates");
         self.update.set(service.update(false));
         // check update TTC PriceTable
-        if service.config.update_ttc_pricetable.unwrap_or(false) {
+        if service.config.update_ttc_pricetable {
             self.ttc_pricetable.set(service.update_ttc_pricetable());
         }
     }

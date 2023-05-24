@@ -4,7 +4,7 @@ use std::fs::{self, File};
 
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
-use crate::config::{self, get_config_dir, EAM_CONF, EAM_DB};
+use crate::config::{self, Config};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
@@ -12,18 +12,20 @@ use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::installed_addon as InstalledAddon;
-use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use lazy_async_promise::{DirectCacheAccess, ImmediateValuePromise, ImmediateValueState};
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbErr,
-    EntityTrait, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbBackend,
+    DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, Statement,
 };
 use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
+use tokio::sync::Mutex;
 use tracing::log::{self, info};
 use zip::ZipArchive;
 
@@ -37,23 +39,25 @@ pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 
-#[derive(Debug, Clone, Default)]
+pub enum ServiceResult {
+    Default(()),
+    AddonShowDetails(Vec<AddonShowDetails>),
+    ZipFile(ZipArchive<File>),
+}
+
+#[derive(Default)]
 pub struct AddonService {
     pub api: ApiClient,
     pub config: config::Config,
-    config_filepath: PathBuf,
     pub db: DatabaseConnection,
+    promises: Arc<Mutex<HashMap<i32, ImmediateValuePromise<ServiceResult>>>>,
+    last_promise: i32,
 }
 impl AddonService {
     pub fn new() -> ImmediateValuePromise<AddonService> {
         ImmediateValuePromise::new(async move {
             // setup config
-            let config_dir = get_config_dir();
-            if !config_dir.exists() {
-                fs::create_dir_all(&config_dir).unwrap();
-            }
-            let config_filepath = config_dir.join(EAM_CONF);
-            let config = config::parse_config(&config_filepath).unwrap();
+            let config = Config::default();
 
             // init api/download client
             // TODO: consider moving endpoint_url to config as default value
@@ -61,7 +65,7 @@ impl AddonService {
             client.update_endpoints_from_config(&config);
 
             // create db file if not exists
-            let db_file = config_dir.join(EAM_DB);
+            let db_file = Config::default_db_path();
             if !db_file.exists() {
                 File::create(&db_file).unwrap();
             }
@@ -74,24 +78,50 @@ impl AddonService {
             Ok(AddonService {
                 api: client,
                 config,
-                config_filepath,
                 db,
+                ..Default::default()
             })
         })
     }
 
-    pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
-        // If this seems to complete instantly when updating multiple addons, do not fret!
-        // That is the magic of downloading and installing all addons in parallel.
-        let service = self.clone();
+    pub fn poll(&mut self) {
+        for promise in self.promises.try_lock().unwrap().values() {
+            promise.poll_state();
+        }
+    }
+
+    pub fn is_polling(&self, id: i32) -> bool {
+        if let Some(promise) = self.promises.try_lock().unwrap().get(&id) {
+            match promise.get_state() {
+                ImmediateValueState::Updating => return true,
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    pub fn handle(&mut self, id: i32) -> Option<&ServiceResult> {
+        if let Some(promise) = self.promises.try_lock().unwrap().get(&id) {
+            match promise.get_state() {
+                ImmediateValueState::Success(_) => {
+                    self.promises.try_lock().unwrap().remove(&id);
+                    return promise.get_value();
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    pub fn install(&mut self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
         ImmediateValuePromise::new(async move {
             let entry = DbAddon::Entity::find_by_id(addon_id)
-                .one(&service.db)
+                .one(&self.db)
                 .await
                 .context(error::DbGetSnafu)?;
             let entry = entry.unwrap();
             let installed_entry = InstalledAddon::Entity::find_by_id(addon_id)
-                .one(&service.db)
+                .one(&self.db)
                 .await
                 .context(error::DbGetSnafu)?;
 
@@ -108,10 +138,17 @@ impl AddonService {
                 info!("Installing addon: {}", addon_id);
             }
 
-            let installed = service
-                .fs_download_addon(entry.download.as_ref().unwrap().as_str())
-                .await
-                .unwrap();
+            let mut installed_promise =
+                self.fs_download_addon(entry.download.as_ref().unwrap().as_str());
+            loop {
+                let state = installed_promise.poll_state();
+                match state {
+                    ImmediateValueState::Success(_) => break,
+                    ImmediateValueState::Error(_) => break,
+                    _ => continue,
+                }
+            }
+            let installed = installed_promise.get_value().unwrap();
             let installed_entry = InstalledAddon::ActiveModel {
                 addon_id: ActiveValue::Set(addon_id),
                 version: ActiveValue::Set(entry.version.to_string()),
@@ -127,7 +164,7 @@ impl AddonService {
                         ])
                         .to_owned(),
                 )
-                .exec(&service.db)
+                .exec(&self.db)
                 .await;
             check_db_result(result)?;
 
@@ -147,7 +184,7 @@ impl AddonService {
                         .do_nothing()
                         .to_owned(),
                     )
-                    .exec(&service.db)
+                    .exec(&self.db)
                     .await;
                 check_db_result(result)?;
             }
@@ -194,17 +231,16 @@ impl AddonService {
     }
 
     pub fn update(&mut self, upgrade_all: bool) -> ImmediateValuePromise<UpdateResult> {
-        let mut service = self.clone();
         ImmediateValuePromise::new(async move {
             // update endpoints from api
             info!("Updating endpoints");
-            service.api.update_endpoints().await.unwrap();
+            self.api.update_endpoints().await.unwrap();
 
             // update categories
-            service.update_categories().await?;
+            self.update_categories().await?;
 
             // update addons
-            let file_list = service.api.get_file_list().await.unwrap();
+            let file_list = self.api.get_file_list().await.unwrap();
 
             let mut insert_addons = vec![];
             let mut insert_addon_dirs = vec![];
@@ -251,39 +287,39 @@ impl AddonService {
                         ])
                         .to_owned(),
                 )
-                .exec(&service.db)
+                .exec(&self.db)
                 .await
                 .context(error::DbPutSnafu)?;
             // delete existing addon directories in case any are removed
             AddonDir::Entity::delete_many()
                 .filter(AddonDir::Column::AddonId.is_in(addon_ids))
-                .exec(&service.db)
+                .exec(&self.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
             // Add addon directories for dependency checks
             AddonDir::Entity::insert_many(insert_addon_dirs)
-                .exec(&service.db)
+                .exec(&self.db)
                 .await
                 .context(error::DbPutSnafu)?;
 
             let mut result = UpdateResult::default();
             if upgrade_all {
-                result = service.upgrade().await.unwrap();
+                result = self.upgrade().await.unwrap();
             } else {
-                let need_installs = service.get_missing_dependency_options().await;
+                let need_installs = self.get_missing_dependency_options().await;
                 result.missing_deps = need_installs;
             }
 
             // find addon details where we have the older version
-            result.missing_details = service.get_missing_addon_detail_ids().await?;
+            result.missing_details = self.get_missing_addon_detail_ids().await?;
 
             info!("Saving config");
-            service.config.file_details = service.api.file_details_url.to_owned();
-            service.config.file_list = service.api.file_list_url.to_owned();
-            service.config.list_files = service.api.list_files_url.to_owned();
-            service.config.category_list = service.api.category_list_url.to_owned();
+            self.config.file_details = self.api.file_details_url.to_owned();
+            self.config.file_list = self.api.file_list_url.to_owned();
+            self.config.list_files = self.api.list_files_url.to_owned();
+            self.config.category_list = self.api.category_list_url.to_owned();
 
-            config::save_config(&service.config_filepath, &service.config).unwrap();
+            self.config.save()?;
 
             Ok(result)
         })
@@ -511,40 +547,43 @@ impl AddonService {
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
         info!("Checking for missing dependencies");
 
-        InstalledAddon::Entity::find()
-            .columns([DbAddon::Column::Id, DbAddon::Column::Name])
-            .column(AddonDir::Column::Dir)
-            .join(JoinType::InnerJoin, InstalledAddon::Relation::Addon.def())
-            .join(JoinType::InnerJoin, DbAddon::Relation::AddonDir.def())
-            .join(
-                JoinType::InnerJoin,
-                DbAddon::Relation::AddonDependency.def(),
+        AddonDepOption::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            r#"select
+            dependency_dir missing_dir,
+            required_by,
+            a.id option_id,
+            a.name option_name
+        from (
+        select
+            adp.dependency_dir,
+            group_concat(a.name, ', ') required_by
+        from installed_addon i
+            inner join addon_dependency adp on i.addon_id = adp.addon_id
+            inner join addon a on i.addon_id = a.id
+        where
+            adp.dependency_dir not in (
+                SELECT
+                    DISTINCT ad.dir
+                FROM
+                    installed_addon i2
+                    inner join addon_dir ad on i2.addon_id = ad.addon_id
             )
-            // ^^^ might have to replace with manual join, as the relation is set up in the other direction
-            .filter(
-                Condition::any().add(
-                    AddonDir::Column::Dir.not_in_subquery(
-                        Query::select()
-                            .column(AddonDir::Column::Dir)
-                            .distinct()
-                            .from(AddonDir::Entity)
-                            .inner_join(
-                                InstalledAddon::Entity,
-                                Expr::col((AddonDir::Entity, AddonDir::Column::AddonId)).equals((
-                                    InstalledAddon::Entity,
-                                    InstalledAddon::Column::AddonId,
-                                )),
-                            )
-                            .to_owned(),
-                    ),
-                ),
-            )
-            .order_by_asc(AddonDir::Column::Dir)
-            .into_model::<AddonDepOption>()
-            .all(&self.db)
-            .await
-            .context(error::DbGetSnafu)
-            .unwrap()
+        group by
+            adp.dependency_dir
+        )
+        left outer join addon_dir ad on dependency_dir = ad.dir
+        left outer join addon a on ad.addon_id = a.id
+        left outer join manual_dependency m on dependency_dir = m.addon_dir
+        where
+            m.addon_dir is NULL
+            or m.ignore <> 1"#,
+            [],
+        ))
+        .all(&self.db)
+        .await
+        .context(error::DbGetSnafu)
+        .unwrap()
     }
 
     pub fn get_addon_details(
@@ -583,108 +622,124 @@ impl AddonService {
         self.config.addon_dir.clone()
     }
 
-    async fn base_fs_download_extract(
-        &self,
-        url: &str,
-        path_addr: Option<&str>,
-    ) -> Result<ZipArchive<File>> {
-        let response = tokio::join!(async move {
-            self.api
-                .download_file(url)
-                .await
-                .unwrap()
-                .bytes()
-                .await
-                .unwrap()
-        })
-        .0;
+    fn base_fs_download_extract(&self, url: &str, path_addr: Option<&str>) -> i32 {
+        let api = &self.api;
+        let addon_dir = self.get_addon_dir().clone();
+        let promise = ImmediateValuePromise::new(async move {
+            let response = api.download_file(url).await.unwrap().bytes().await.unwrap();
 
-        let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
-        let mut r_tmpfile = tmpfile
-            .reopen()
-            .context(error::AddonDownloadTmpFileReadSnafu)?;
-        tmpfile
-            .write_all(response.as_ref())
-            .context(error::AddonDownloadTmpFileWriteSnafu)?;
-        r_tmpfile.rewind().unwrap();
+            let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
+            let mut r_tmpfile = tmpfile
+                .reopen()
+                .context(error::AddonDownloadTmpFileReadSnafu)?;
+            tmpfile
+                .write_all(response.as_ref())
+                .context(error::AddonDownloadTmpFileWriteSnafu)?;
+            r_tmpfile.rewind().unwrap();
 
-        let mut archive =
-            zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
+            let mut archive =
+                zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
 
-        for i in 0..archive.len() {
-            let mut file = archive
-                .by_index(i)
-                .context(error::AddonDownloadZipReadSnafu { file: i })?;
-            let outpath = match file.enclosed_name() {
-                Some(path) => {
-                    let mut p = self.get_addon_dir().clone();
-                    if path_addr.is_some() {
-                        // append additional path if defined
-                        p.push(path_addr.unwrap());
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index(i)
+                    .context(error::AddonDownloadZipReadSnafu { file: i })?;
+                let outpath = match file.enclosed_name() {
+                    Some(path) => {
+                        let mut p = addon_dir.clone();
+                        if path_addr.is_some() {
+                            // append additional path if defined
+                            p.push(path_addr.unwrap());
+                        }
+                        p.push(path);
+                        p
                     }
-                    p.push(path);
-                    p
-                }
 
-                None => continue,
-            };
+                    None => continue,
+                };
 
-            if (file.name()).ends_with('/') {
-                fs::create_dir_all(&outpath)
-                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p)
-                            .context(error::AddonDownloadZipExtractSnafu { path: p })?;
+                if (file.name()).ends_with('/') {
+                    fs::create_dir_all(&outpath)
+                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        if !p.exists() {
+                            fs::create_dir_all(p)
+                                .context(error::AddonDownloadZipExtractSnafu { path: p })?;
+                        }
                     }
+                    let mut outfile = fs::File::create(&outpath).context(
+                        error::AddonDownloadZipExtractSnafu {
+                            path: outpath.to_owned(),
+                        },
+                    )?;
+                    io::copy(&mut file, &mut outfile)
+                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
                 }
-                let mut outfile =
-                    fs::File::create(&outpath).context(error::AddonDownloadZipExtractSnafu {
-                        path: outpath.to_owned(),
-                    })?;
-                io::copy(&mut file, &mut outfile)
-                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             }
-        }
 
-        Ok(archive)
+            Ok(ServiceResult::ZipFile(archive))
+        });
+        self.last_promise += 1;
+        let id = self.last_promise;
+        self.promises.try_lock().unwrap().insert(id, promise);
+        id
     }
 
-    async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
-        let mut archive = self.base_fs_download_extract(url, None).await.unwrap();
-        let mut addon_path = self.get_addon_dir();
-        let addon_name = archive
-            .by_index(0)
-            .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
-        let addon_name = get_root_dir(&addon_name.mangled_name());
-        addon_path.push(addon_name);
-
-        let addon = fs_read_addon(&addon_path);
-
-        Ok(addon.unwrap())
-    }
-
-    pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
-        let service = self.clone();
+    fn fs_download_addon(&self, url: &str) -> ImmediateValuePromise<Addon> {
         ImmediateValuePromise::new(async move {
-            info!("Updating TTC PriceTable");
-            service
-                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"))
-                .await
+            let archive = self.base_fs_download_extract(url, None);
+            loop {
+                let state = archive.poll_state();
+                match state {
+                    ImmediateValueState::Success(_) => break,
+                    ImmediateValueState::Error(_) => break,
+                    _ => continue,
+                }
+            }
+            let mut addon_path = self.get_addon_dir();
+            let addon_name = archive
+                .get_value()
+                .unwrap()
+                .by_index(0)
+                .context(error::AddonDownloadZipReadSnafu { file: 0_usize })
                 .unwrap();
-            Ok(())
+            let addon_name = get_root_dir(&addon_name.mangled_name());
+            addon_path.push(addon_name);
+
+            let addon = fs_read_addon(&addon_path);
+
+            Ok(addon.unwrap())
         })
+    }
+
+    pub fn update_ttc_pricetable(&self) -> i32 {
+        let promise = ImmediateValuePromise::new(async move {
+            info!("Updating TTC PriceTable");
+            let promise = self.base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"));
+            let result: Option<&ServiceResult>;
+            loop {
+                if !self.is_polling(promise) {
+                    result = Some(self.handle(promise).unwrap());
+                    break;
+                }
+            }
+            // match result {}
+            Ok(ServiceResult::Default(()))
+        });
+        self.last_promise += 1;
+        let id = self.last_promise;
+        self.promises.try_lock().unwrap().insert(id, promise);
+        id
     }
 
     pub fn save_config(&self) {
-        config::save_config(&self.config_filepath, &self.config).unwrap();
+        self.config.save().unwrap();
     }
 
     pub fn import_minion_file(&mut self, file: &PathBuf) -> ImmediateValuePromise<()> {
         // Takes a path to a minion backup file, it should be named something like `BU-addons.txt`
         // It should contain a single line of comma-separated addon IDs
-        let service = self.clone();
         let filepath = file.clone();
 
         ImmediateValuePromise::new(async move {
@@ -701,7 +756,7 @@ impl AddonService {
                 .map(|x| x.parse::<i32>().unwrap())
                 .collect();
             for addon_id in ids.iter() {
-                install_promises.insert(*addon_id, service.install(*addon_id, false));
+                install_promises.insert(*addon_id, self.install(*addon_id, false));
             }
 
             while !install_promises.is_empty() {
@@ -721,7 +776,7 @@ impl AddonService {
     }
 
     pub fn get_category_parents(&self) -> ImmediateValuePromise<Vec<ParentCategory>> {
-        let db = self.db.clone();
+        let db = &self.db;
         ImmediateValuePromise::new(async move {
             // select on Category instead
             let parents = Category::Entity::find()
@@ -732,7 +787,7 @@ impl AddonService {
                 .filter(CategoryParent::Column::ParentId.ne(0))
                 .order_by_asc(Category::Column::Id)
                 .group_by(CategoryParent::Column::ParentId)
-                .all(&db)
+                .all(db)
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();
@@ -745,7 +800,7 @@ impl AddonService {
                     )
                     .filter(CategoryParent::Column::ParentId.eq(parent.id))
                     .order_by_asc(Category::Column::Id)
-                    .all(&db)
+                    .all(db)
                     .await
                     .context(error::DbGetSnafu)
                     .unwrap();
@@ -759,12 +814,9 @@ impl AddonService {
         })
     }
 
-    pub fn get_addons_by_category(
-        &self,
-        category_id: i32,
-    ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
-        let db = self.db.clone();
-        ImmediateValuePromise::new(async move {
+    pub fn get_addons_by_category(&self, category_id: i32) -> i32 {
+        let db = &self.db;
+        let promise = ImmediateValuePromise::new(async move {
             let mut addons = DbAddon::Entity::find()
                 .column_as(DbAddon::Column::Version, "version")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
@@ -785,12 +837,42 @@ impl AddonService {
                 )
                 .group_by(DbAddon::Column::Id)
                 .into_model::<AddonShowDetails>()
-                .all(&db)
+                .all(db)
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();
             addons.truncate(100);
-            Ok(addons)
+            Ok(ServiceResult::AddonShowDetails(addons))
+        });
+        self.last_promise += 1;
+        let id = self.last_promise;
+        self.promises.try_lock().unwrap().insert(id, promise);
+        id
+    }
+    pub fn install_missing_dependencies(
+        &self,
+        dep_results: HashMap<String, MissingDepView>,
+    ) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            // install selected IDs if not installed
+            for (dir, dep_opt) in dep_results.iter() {
+                if let Some(satisfied_by) = dep_opt.satisfied_by {
+                    // if it's in the options, it means not installed
+                    if dep_opt.options.contains_key(&satisfied_by) {
+                        // install addon
+                        let mut promise = service.install(satisfied_by, false);
+                        loop {
+                            let state = promise.poll_state();
+                            if let ImmediateValueState::Success(_) = state {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // insert dep options
+            Ok(())
         })
     }
 }

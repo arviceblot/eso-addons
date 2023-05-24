@@ -9,3 +9,4 @@ pub mod addon_dir;
 pub mod category;
 pub mod category_parent;
 pub mod installed_addon;
+pub mod manual_dependency;

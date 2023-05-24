@@ -8,6 +8,8 @@ mod views;
 use views::addon_details::Details;
 use views::browse::Browse;
 use views::installed::Installed;
+use views::missing_deps::MissingDeps;
+use views::onboard::Onboard;
 use views::search::Search;
 use views::settings::Settings;
 use views::ui_helpers::{PromisedValue, ViewOpt};
@@ -28,7 +30,7 @@ async fn main() -> Result<(), eframe::Error> {
         initial_window_size: Some(egui::vec2(960.0, 600.0)),
         ..Default::default()
     };
-    eframe::run_native(APP_NAME, options, Box::new(|_cc| Box::new(EamApp::new())))
+    eframe::run_native(APP_NAME, options, Box::new(|_cc| Box::<EamApp>::default()))
 }
 
 struct EamApp {
@@ -41,10 +43,11 @@ struct EamApp {
     service: PromisedValue<AddonService>,
     selected_addon: Option<i32>,
     details: Details,
+    onboard: Onboard,
+    missing_dep: MissingDeps,
 }
-
-impl EamApp {
-    pub fn new() -> EamApp {
+impl Default for EamApp {
+    fn default() -> Self {
         let mut service = PromisedValue::<AddonService>::default();
         service.set(AddonService::new());
 
@@ -58,8 +61,13 @@ impl EamApp {
             service,
             selected_addon: None,
             details: Details::default(),
+            onboard: Onboard::default(),
+            missing_dep: MissingDeps::new(),
         }
     }
+}
+
+impl EamApp {
     fn check_view_update(&mut self) {
         if self.view != self.prev_view {
             if self.view == ViewOpt::Installed {
@@ -75,14 +83,11 @@ impl EamApp {
         self.prev_view = self.view;
     }
     fn handle_addon_selected(&mut self, addon_id: Option<i32>) {
-        if addon_id.is_none() {
-            return;
-        }
-        if addon_id.is_some() {
-            if self.selected_addon.is_some() && addon_id.unwrap() != self.selected_addon.unwrap() {
+        if let Some(addon_id) = addon_id {
+            if self.selected_addon.is_some() && addon_id != self.selected_addon.unwrap() {
                 return;
             }
-            self.selected_addon = addon_id;
+            self.selected_addon = Some(addon_id);
             self.details.set_addon(
                 self.selected_addon.unwrap(),
                 self.service.value.as_mut().unwrap(),
@@ -101,6 +106,20 @@ impl eframe::App for EamApp {
             if !self.service.is_ready() {
                 self.service.poll();
                 ui.spinner();
+                return;
+            }
+
+            // check if need onboarding
+            if self.service.value.as_ref().unwrap().config.onboard {
+                self.onboard
+                    .ui(ctx, ui, self.service.value.as_mut().unwrap());
+                return;
+            }
+
+            // check if missing deps
+            if self.missing_dep.has_missing() {
+                self.missing_dep
+                    .ui(ctx, ui, self.service.value.as_mut().unwrap());
                 return;
             }
 
@@ -141,6 +160,27 @@ impl eframe::App for EamApp {
                 }
                 ViewOpt::Details => None,
             };
+
+            // check missing dep from update result
+            if self.installed_view.update.value.is_some() {
+                let missing = &self
+                    .installed_view
+                    .update
+                    .value
+                    .as_ref()
+                    .unwrap()
+                    .missing_deps;
+                if !missing.is_empty() {
+                    self.missing_dep.set_deps(missing.to_vec());
+                    self.installed_view
+                        .update
+                        .value
+                        .as_mut()
+                        .unwrap()
+                        .missing_deps
+                        .clear();
+                }
+            }
             self.handle_addon_selected(addon_id);
         });
     }

@@ -39,6 +39,8 @@ pub enum Relation {
     Category,
     #[sea_orm(has_many = "super::installed_addon::Entity")]
     InstalledAddon,
+    #[sea_orm(has_many = "super::manual_dependency::Entity")]
+    ManualDependency,
 }
 
 impl Related<super::addon_dependency::Entity> for Entity {
@@ -68,6 +70,12 @@ impl Related<super::category::Entity> for Entity {
 impl Related<super::installed_addon::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InstalledAddon.def()
+    }
+}
+
+impl Related<super::manual_dependency::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ManualDependency.def()
     }
 }
 
