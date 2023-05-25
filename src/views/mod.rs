@@ -4,6 +4,8 @@ use eso_addons_core::service::AddonService;
 pub mod addon_details;
 pub mod browse;
 pub mod installed;
+pub mod missing_deps;
+pub mod onboard;
 pub mod search;
 pub mod settings;
 pub mod ui_helpers;

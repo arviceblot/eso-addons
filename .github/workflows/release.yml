@@ -76,7 +76,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt install zsync
-          cargo install cargo-appimage
+          cargo install --git https://github.com/StratusFearMe21/cargo-appimage.git
 
       - name: Install appimagetool
         run: |

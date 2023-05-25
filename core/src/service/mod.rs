@@ -4,7 +4,7 @@ use std::fs::{self, File};
 
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
-use crate::config::{self, get_config_dir, EAM_CONF, EAM_DB};
+use crate::config::{self, Config};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
@@ -12,18 +12,21 @@ use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::installed_addon as InstalledAddon;
-use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use entity::manual_dependency as ManualDependency;
+use lazy_async_promise::{DirectCacheAccess, ImmediateValuePromise, ImmediateValueState};
 use migration::{Condition, Migrator, MigratorTrait};
 use sea_orm::sea_query::{Expr, OnConflict, Query};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbErr,
-    EntityTrait, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbBackend,
+    DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, Statement,
 };
 use snafu::ResultExt;
 use std::io::{self, Seek, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
+use tokio::sync::Mutex;
 use tracing::log::{self, info};
 use zip::ZipArchive;
 
@@ -37,31 +40,36 @@ pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 
+pub enum ServiceResult {
+    Default(()),
+    AddonShowDetails(Vec<AddonShowDetails>),
+    ZipFile(ZipArchive<File>),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
     pub api: ApiClient,
     pub config: config::Config,
-    config_filepath: PathBuf,
     pub db: DatabaseConnection,
 }
 impl AddonService {
     pub fn new() -> ImmediateValuePromise<AddonService> {
         ImmediateValuePromise::new(async move {
             // setup config
-            let config_dir = get_config_dir();
-            if !config_dir.exists() {
-                fs::create_dir_all(&config_dir).unwrap();
-            }
-            let config_filepath = config_dir.join(EAM_CONF);
-            let config = config::parse_config(&config_filepath).unwrap();
+            let config = Config::default();
 
             // init api/download client
             // TODO: consider moving endpoint_url to config as default value
             let mut client = ApiClient::new("https://api.mmoui.com/v3");
-            client.update_endpoints_from_config(&config);
+            if config.file_list.is_empty() {
+                client.update_endpoints().await.unwrap();
+            }
+            else {
+                client.update_endpoints_from_config(&config);
+            }
 
             // create db file if not exists
-            let db_file = config_dir.join(EAM_DB);
+            let db_file = Config::default_db_path();
             if !db_file.exists() {
                 File::create(&db_file).unwrap();
             }
@@ -74,24 +82,28 @@ impl AddonService {
             Ok(AddonService {
                 api: client,
                 config,
-                config_filepath,
                 db,
+                ..Default::default()
             })
         })
     }
 
     pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
-        // If this seems to complete instantly when updating multiple addons, do not fret!
-        // That is the magic of downloading and installing all addons in parallel.
         let service = self.clone();
         ImmediateValuePromise::new(async move {
+            service.p_install(addon_id, update).await.unwrap();
+            Ok(())
+        })
+    }
+    async fn p_install(&self, addon_id: i32, update: bool) -> Result<()> {
+            self.p_update_addon_details(addon_id).await.unwrap();
             let entry = DbAddon::Entity::find_by_id(addon_id)
-                .one(&service.db)
+                .one(&self.db)
                 .await
                 .context(error::DbGetSnafu)?;
             let entry = entry.unwrap();
             let installed_entry = InstalledAddon::Entity::find_by_id(addon_id)
-                .one(&service.db)
+                .one(&self.db)
                 .await
                 .context(error::DbGetSnafu)?;
 
@@ -108,10 +120,7 @@ impl AddonService {
                 info!("Installing addon: {}", addon_id);
             }
 
-            let installed = service
-                .fs_download_addon(entry.download.as_ref().unwrap().as_str())
-                .await
-                .unwrap();
+            let installed = self.fs_download_addon(entry.download.as_ref().unwrap().as_str()).await?;
             let installed_entry = InstalledAddon::ActiveModel {
                 addon_id: ActiveValue::Set(addon_id),
                 version: ActiveValue::Set(entry.version.to_string()),
@@ -127,7 +136,7 @@ impl AddonService {
                         ])
                         .to_owned(),
                 )
-                .exec(&service.db)
+                .exec(&self.db)
                 .await;
             check_db_result(result)?;
 
@@ -147,12 +156,11 @@ impl AddonService {
                         .do_nothing()
                         .to_owned(),
                     )
-                    .exec(&service.db)
+                    .exec(&self.db)
                     .await;
                 check_db_result(result)?;
             }
             Ok(())
-        })
     }
 
     pub async fn upgrade(&mut self) -> Result<UpdateResult> {
@@ -283,7 +291,7 @@ impl AddonService {
             service.config.list_files = service.api.list_files_url.to_owned();
             service.config.category_list = service.api.category_list_url.to_owned();
 
-            config::save_config(&service.config_filepath, &service.config).unwrap();
+            service.config.save()?;
 
             Ok(result)
         })
@@ -318,12 +326,10 @@ impl AddonService {
         Ok(results)
     }
 
-    pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
-        let service = self.clone();
-        ImmediateValuePromise::new(async move {
+    async fn p_update_addon_details(&self, id: i32) -> Result<()> {
             info!("Updating addon details for addon: {}", id);
 
-            let file_details = service.api.get_file_details(id).await?;
+            let file_details = self.api.get_file_details(id).await?;
             let record = AddonDetail::ActiveModel {
                 id: ActiveValue::Set(id),
                 description: ActiveValue::Set(Some(file_details.description)),
@@ -331,13 +337,13 @@ impl AddonService {
                 version: ActiveValue::Set(Some(file_details.version)),
             };
 
-            let addon = DbAddon::Entity::find_by_id(id).one(&service.db).await?;
+            let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
             let mut active: DbAddon::ActiveModel = addon.unwrap().into_active_model();
             active.md5 = Set(Some(file_details.md5.to_owned()));
             active.file_name = Set(Some(file_details.file_name.to_owned()));
             active.download = Set(Some(file_details.download_url.to_owned()));
             active
-                .update(&service.db)
+                .update(&self.db)
                 .await
                 .context(error::DbPutSnafu)?;
 
@@ -351,10 +357,16 @@ impl AddonService {
                         ])
                         .to_owned(),
                 )
-                .exec(&service.db)
+                .exec(&self.db)
                 .await
                 .context(error::DbPutSnafu)?;
 
+            Ok(())
+    }
+    pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            service.p_update_addon_details(id).await.unwrap();
             Ok(())
         })
     }
@@ -511,40 +523,43 @@ impl AddonService {
     pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
         info!("Checking for missing dependencies");
 
-        InstalledAddon::Entity::find()
-            .columns([DbAddon::Column::Id, DbAddon::Column::Name])
-            .column(AddonDir::Column::Dir)
-            .join(JoinType::InnerJoin, InstalledAddon::Relation::Addon.def())
-            .join(JoinType::InnerJoin, DbAddon::Relation::AddonDir.def())
-            .join(
-                JoinType::InnerJoin,
-                DbAddon::Relation::AddonDependency.def(),
+        AddonDepOption::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            r#"select
+            dependency_dir missing_dir,
+            required_by,
+            a.id option_id,
+            a.name option_name
+        from (
+        select
+            adp.dependency_dir,
+            group_concat(a.name, ', ') required_by
+        from installed_addon i
+            inner join addon_dependency adp on i.addon_id = adp.addon_id
+            inner join addon a on i.addon_id = a.id
+        where
+            adp.dependency_dir not in (
+                SELECT
+                    DISTINCT ad.dir
+                FROM
+                    installed_addon i2
+                    inner join addon_dir ad on i2.addon_id = ad.addon_id
             )
-            // ^^^ might have to replace with manual join, as the relation is set up in the other direction
-            .filter(
-                Condition::any().add(
-                    AddonDir::Column::Dir.not_in_subquery(
-                        Query::select()
-                            .column(AddonDir::Column::Dir)
-                            .distinct()
-                            .from(AddonDir::Entity)
-                            .inner_join(
-                                InstalledAddon::Entity,
-                                Expr::col((AddonDir::Entity, AddonDir::Column::AddonId)).equals((
-                                    InstalledAddon::Entity,
-                                    InstalledAddon::Column::AddonId,
-                                )),
-                            )
-                            .to_owned(),
-                    ),
-                ),
-            )
-            .order_by_asc(AddonDir::Column::Dir)
-            .into_model::<AddonDepOption>()
-            .all(&self.db)
-            .await
-            .context(error::DbGetSnafu)
-            .unwrap()
+        group by
+            adp.dependency_dir
+        )
+        left outer join addon_dir ad on dependency_dir = ad.dir
+        left outer join addon a on ad.addon_id = a.id
+        left outer join manual_dependency m on dependency_dir = m.addon_dir
+        where
+            m.addon_dir is NULL
+            or m.ignore <> 1"#,
+            [],
+        ))
+        .all(&self.db)
+        .await
+        .context(error::DbGetSnafu)
+        .unwrap()
     }
 
     pub fn get_addon_details(
@@ -583,102 +598,87 @@ impl AddonService {
         self.config.addon_dir.clone()
     }
 
-    async fn base_fs_download_extract(
-        &self,
-        url: &str,
-        path_addr: Option<&str>,
-    ) -> Result<ZipArchive<File>> {
-        let response = tokio::join!(async move {
-            self.api
-                .download_file(url)
-                .await
-                .unwrap()
-                .bytes()
-                .await
-                .unwrap()
-        })
-        .0;
+    async fn base_fs_download_extract(&self, url: &str, path_addr: Option<&str>) -> Result<ZipArchive<File>>{
+            let response = tokio::join!(async move {self.api.download_file(url).await.unwrap().bytes().await.unwrap()}).0;
 
-        let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
-        let mut r_tmpfile = tmpfile
-            .reopen()
-            .context(error::AddonDownloadTmpFileReadSnafu)?;
-        tmpfile
-            .write_all(response.as_ref())
-            .context(error::AddonDownloadTmpFileWriteSnafu)?;
-        r_tmpfile.rewind().unwrap();
+            let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
+            let mut r_tmpfile = tmpfile
+                .reopen()
+                .context(error::AddonDownloadTmpFileReadSnafu)?;
+            tmpfile
+                .write_all(response.as_ref())
+                .context(error::AddonDownloadTmpFileWriteSnafu)?;
+            r_tmpfile.rewind().unwrap();
 
-        let mut archive =
-            zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
+            let mut archive =
+                zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
 
-        for i in 0..archive.len() {
-            let mut file = archive
-                .by_index(i)
-                .context(error::AddonDownloadZipReadSnafu { file: i })?;
-            let outpath = match file.enclosed_name() {
-                Some(path) => {
-                    let mut p = self.get_addon_dir().clone();
-                    if path_addr.is_some() {
-                        // append additional path if defined
-                        p.push(path_addr.unwrap());
+            for i in 0..archive.len() {
+                let mut file = archive
+                    .by_index(i)
+                    .context(error::AddonDownloadZipReadSnafu { file: i })?;
+                let outpath = match file.enclosed_name() {
+                    Some(path) => {
+                        let mut p = self.get_addon_dir().clone();
+                        if path_addr.is_some() {
+                            // append additional path if defined
+                            p.push(path_addr.unwrap());
+                        }
+                        p.push(path);
+                        p
                     }
-                    p.push(path);
-                    p
-                }
 
-                None => continue,
-            };
+                    None => continue,
+                };
 
-            if (file.name()).ends_with('/') {
-                fs::create_dir_all(&outpath)
-                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p)
-                            .context(error::AddonDownloadZipExtractSnafu { path: p })?;
+                if (file.name()).ends_with('/') {
+                    fs::create_dir_all(&outpath)
+                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
+                } else {
+                    if let Some(p) = outpath.parent() {
+                        if !p.exists() {
+                            fs::create_dir_all(p)
+                                .context(error::AddonDownloadZipExtractSnafu { path: p })?;
+                        }
                     }
+                    let mut outfile = fs::File::create(&outpath).context(
+                        error::AddonDownloadZipExtractSnafu {
+                            path: outpath.to_owned(),
+                        },
+                    )?;
+                    io::copy(&mut file, &mut outfile)
+                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
                 }
-                let mut outfile =
-                    fs::File::create(&outpath).context(error::AddonDownloadZipExtractSnafu {
-                        path: outpath.to_owned(),
-                    })?;
-                io::copy(&mut file, &mut outfile)
-                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             }
-        }
 
-        Ok(archive)
+            Ok(archive)
     }
 
     async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
-        let mut archive = self.base_fs_download_extract(url, None).await.unwrap();
-        let mut addon_path = self.get_addon_dir();
-        let addon_name = archive
-            .by_index(0)
-            .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
-        let addon_name = get_root_dir(&addon_name.mangled_name());
-        addon_path.push(addon_name);
+            let mut archive = self.base_fs_download_extract(url, None).await?;
+            let mut addon_path = self.get_addon_dir();
+            let addon_name = archive
+                .by_index(0)
+                .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
+            let addon_name = get_root_dir(&addon_name.mangled_name());
+            addon_path.push(addon_name);
 
-        let addon = fs_read_addon(&addon_path);
+            let addon = fs_read_addon(&addon_path);
 
-        Ok(addon.unwrap())
+            Ok(addon.unwrap())
     }
 
     pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            service
-                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"))
-                .await
-                .unwrap();
+            service.base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre")).await?;
             Ok(())
         })
     }
 
     pub fn save_config(&self) {
-        config::save_config(&self.config_filepath, &self.config).unwrap();
+        self.config.save().unwrap();
     }
 
     pub fn import_minion_file(&mut self, file: &PathBuf) -> ImmediateValuePromise<()> {
@@ -759,10 +759,7 @@ impl AddonService {
         })
     }
 
-    pub fn get_addons_by_category(
-        &self,
-        category_id: i32,
-    ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
+    pub fn get_addons_by_category(&self, category_id: i32) -> ImmediateValuePromise<Vec<AddonShowDetails>>{
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
             let mut addons = DbAddon::Entity::find()
@@ -791,6 +788,45 @@ impl AddonService {
                 .unwrap();
             addons.truncate(100);
             Ok(addons)
+        })
+    }
+    pub fn install_missing_dependencies(
+        &self,
+        dep_results: Vec<MissingDepView>,
+    ) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            let mut dep_inserts = vec!();
+            // install selected IDs if not installed
+            for dep_opt in dep_results.iter() {
+                if let Some(satisfied_by) = dep_opt.satisfied_by {
+                    // if it's in the options, it means not installed
+                    if dep_opt.options.contains_key(&satisfied_by) {
+                        // install addon
+                        service.p_install(satisfied_by, false).await.unwrap();
+                        dep_inserts.push(ManualDependency::ActiveModel {
+                            addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
+                            ignore: ActiveValue::Set(Some(dep_opt.ignore)),
+                            satisfied_by: ActiveValue::Set(Some(satisfied_by)),
+                        });
+                    }
+                }
+            }
+            // insert dep options
+            ManualDependency::Entity::insert_many(dep_inserts)
+                .on_conflict(
+                    OnConflict::column(
+                        ManualDependency::Column::AddonDir
+                    )
+                    .update_columns([
+                        ManualDependency::Column::Ignore,
+                        ManualDependency::Column::SatisfiedBy
+                    ])
+                    .to_owned(),
+                )
+                .exec(&service.db)
+                .await?;
+            Ok(())
         })
     }
 }

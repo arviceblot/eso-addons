@@ -14,6 +14,7 @@ pub struct Settings {
     opened_file: Option<PathBuf>,
     open_file_dialog: Option<FileDialog>,
     minion_import: Option<PromisedValue<()>>,
+    open_addon_dir_dialog: Option<FileDialog>,
 }
 impl Settings {
     fn poll(&mut self) {
@@ -36,12 +37,32 @@ impl View for Settings {
     ) -> Option<i32> {
         self.poll();
 
-        ui.checkbox(
-            service.config.update_on_launch.get_or_insert(false),
-            "Update on launch",
+        if ui.button("Change AddOn Folder...").clicked() {
+            // select game addon path
+            let mut dialog = FileDialog::select_folder(Some(service.config.addon_dir.clone()));
+            dialog.open();
+            self.open_addon_dir_dialog = Some(dialog);
+        }
+        if let Some(dialog) = &mut self.open_addon_dir_dialog {
+            if dialog.show(ctx).selected() {
+                if let Some(dir) = dialog.path() {
+                    service.config.addon_dir = dir;
+                    service.save_config();
+                }
+            }
+        }
+        ui.label(
+            service
+                .config
+                .addon_dir
+                .clone()
+                .into_os_string()
+                .to_str()
+                .unwrap(),
         );
+        ui.checkbox(&mut service.config.update_on_launch, "Update on launch");
         ui.checkbox(
-            service.config.update_ttc_pricetable.get_or_insert(false),
+            &mut service.config.update_ttc_pricetable,
             "Update TTC PriceTable",
         );
         ui.separator();
