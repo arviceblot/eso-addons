@@ -14,8 +14,9 @@ pub struct AddonDepOption {
     pub option_name: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MissingDepView {
+    pub missing_dir: String,
     pub required_by: String,
     pub options: HashMap<i32, String>,
     pub ignore: bool,

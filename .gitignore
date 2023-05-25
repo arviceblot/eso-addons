@@ -74,6 +74,7 @@ target/
 .flatpak-builder/
 flatpak-cargo-generator.py
 test-flatpak/
+test_Addons/
 libs/
 *.AppImage
 *.zsync

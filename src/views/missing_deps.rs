@@ -51,6 +51,7 @@ impl MissingDeps {
         self.install_new.poll();
         if self.install_new.is_ready() {
             self.install_new.handle();
+            self.missing_deps.clear();
         }
     }
     fn get_installed_addons(&mut self, service: &mut AddonService) {
@@ -72,7 +73,11 @@ impl MissingDeps {
         for dep in deps.iter() {
             let dep_view = match self.missing_deps.entry(dep.missing_dir.clone()) {
                 Entry::Occupied(o) => o.into_mut(),
-                Entry::Vacant(v) => v.insert(MissingDepView::new(dep.required_by.clone())),
+                Entry::Vacant(v) => {
+                    let mut missing_dep = MissingDepView::new(dep.required_by.clone());
+                    missing_dep.missing_dir = dep.missing_dir.clone();
+                    v.insert(MissingDepView::new(dep.required_by.clone()))
+                }
             };
             if let Some(option_id) = dep.option_id {
                 dep_view
@@ -83,8 +88,9 @@ impl MissingDeps {
     }
     fn install_new(&mut self, service: &mut AddonService) {
         // Install selected missing dep addons or set to ignore
+        let vecs: Vec<MissingDepView> = self.missing_deps.values().cloned().collect();
         self.install_new
-            .set(service.install_missing_dependencies(&self.missing_deps));
+            .set(service.install_missing_dependencies(vecs));
     }
 }
 
@@ -119,7 +125,6 @@ impl View for MissingDeps {
         egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
             ui.add_enabled_ui(self.install_missing_ready(), |ui| {
                 if ui.button("Install").clicked() {
-                    // TODO: handle install deps
                     self.install_new(service);
                 }
             });

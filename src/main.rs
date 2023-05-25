@@ -1,4 +1,5 @@
 use dotenv::dotenv;
+use std::time::Duration;
 use eframe::egui;
 use eso_addons_core::service::AddonService;
 use views::View;
@@ -102,6 +103,7 @@ impl eframe::App for EamApp {
         true
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint_after(Duration::new(1, 0));
         egui::CentralPanel::default().show(ctx, |ui| {
             if !self.service.is_ready() {
                 self.service.poll();
