@@ -848,18 +848,21 @@ impl AddonService {
             let mut dep_inserts = vec![];
             // install selected IDs if not installed
             for dep_opt in dep_results.iter() {
+                let mut dep_insert = ManualDependency::ActiveModel {
+                    addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
+                    ignore: ActiveValue::Set(None),
+                    satisfied_by: ActiveValue::Set(None),
+                };
                 if let Some(satisfied_by) = dep_opt.satisfied_by {
                     // if it's in the options, it means not installed
                     if dep_opt.options.contains_key(&satisfied_by) {
                         // install addon
                         service.p_install(satisfied_by, false).await.unwrap();
-                        dep_inserts.push(ManualDependency::ActiveModel {
-                            addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
-                            ignore: ActiveValue::Set(Some(dep_opt.ignore)),
-                            satisfied_by: ActiveValue::Set(Some(satisfied_by)),
-                        });
                     }
+                    dep_insert.satisfied_by = ActiveValue::Set(Some(satisfied_by));
                 }
+                dep_insert.ignore = ActiveValue::Set(Some(dep_opt.ignore));
+                dep_inserts.push(dep_insert);
             }
             // insert dep options
             ManualDependency::Entity::insert_many(dep_inserts)
