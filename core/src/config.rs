@@ -54,6 +54,8 @@ pub struct Config {
     pub update_on_launch: bool,
     #[serde(default = "default_true")]
     pub onboard: bool,
+    #[serde(default)]
+    pub update_hm_data: bool,
 }
 impl Default for Config {
     fn default() -> Self {

@@ -74,11 +74,11 @@ impl MissingDeps {
             let dep_view = match self.missing_deps.entry(dep.missing_dir.clone()) {
                 Entry::Occupied(o) => o.into_mut(),
                 Entry::Vacant(v) => {
-                    let mut missing_dep = MissingDepView::new(dep.required_by.clone());
-                    missing_dep.missing_dir = dep.missing_dir.clone();
-                    v.insert(MissingDepView::new(dep.required_by.clone()))
+                    let missing_dep = MissingDepView::new(dep.required_by.clone());
+                    v.insert(missing_dep)
                 }
             };
+            dep_view.missing_dir = dep.missing_dir.clone();
             if let Some(option_id) = dep.option_id {
                 dep_view
                     .options

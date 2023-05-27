@@ -60,10 +60,17 @@ impl View for Settings {
                 .to_str()
                 .unwrap(),
         );
-        ui.checkbox(&mut service.config.update_on_launch, "Update on launch");
+        ui.checkbox(
+            &mut service.config.update_on_launch,
+            "Check for updates on launch",
+        );
         ui.checkbox(
             &mut service.config.update_ttc_pricetable,
-            "Update TTC PriceTable",
+            "Update TTC PriceTable on launch (requires TamrielTradeCentre to be installed)",
+        );
+        ui.checkbox(
+            &mut service.config.update_hm_data,
+            "Update HarvestMap data on launch (requires HarvestMap-Data to be installed)",
         );
         ui.separator();
 

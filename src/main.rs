@@ -1,7 +1,7 @@
 use dotenv::dotenv;
-use std::time::Duration;
 use eframe::egui;
 use eso_addons_core::service::AddonService;
+use std::time::Duration;
 use views::View;
 
 mod views;
