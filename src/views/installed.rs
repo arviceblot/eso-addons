@@ -16,8 +16,9 @@ use super::{
     View,
 };
 
-const DETAIL_BUFF_SIZE: usize = 20;
+const DETAIL_BUFF_SIZE: usize = 50;
 
+#[derive(Default)]
 pub struct Installed {
     // addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
@@ -27,6 +28,7 @@ pub struct Installed {
     update_details_q: VecDeque<i32>,
     update_details: HashMap<i32, PromisedValue<()>>,
     ttc_pricetable: PromisedValue<()>,
+    hm_data: PromisedValue<()>,
     displayed_addons: Vec<AddonShowDetails>,
     log: Vec<String>,
     filter: String,
@@ -53,6 +55,7 @@ impl Installed {
             prev_sort: Sort::Id,
             init: true,
             editing: false,
+            ..Default::default()
         }
     }
     fn show_init(&mut self) -> bool {
@@ -77,6 +80,11 @@ impl Installed {
         if self.ttc_pricetable.is_ready() {
             self.log.push("Updated TTC PriceTable.".to_string());
             self.ttc_pricetable.handle();
+        }
+        self.hm_data.poll();
+        if self.hm_data.is_ready() {
+            self.log.push("Updated HarvestMap data.".to_string());
+            self.hm_data.handle();
         }
 
         self.update_addon_details(service);
@@ -182,6 +190,10 @@ impl Installed {
         // check update TTC PriceTable
         if service.config.update_ttc_pricetable {
             self.ttc_pricetable.set(service.update_ttc_pricetable());
+        }
+        // check HarvestMap data
+        if service.config.update_hm_data {
+            self.hm_data.set(service.update_hm_data());
         }
     }
     fn handle_sort(&mut self) {

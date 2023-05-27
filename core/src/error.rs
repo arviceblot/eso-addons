@@ -86,6 +86,21 @@ pub enum Error {
 
     #[snafu(display("Error extracting from zip file at {}: {}", path.display(), source))]
     AddonDownloadZipExtract { source: io::Error, path: PathBuf },
+
+    #[snafu(display(
+        "Error with file hash for: {} -> Expected: {} Actual: {}",
+        file_name,
+        expected_hash,
+        actual_hash
+    ))]
+    AddonDownloadHash {
+        file_name: String,
+        expected_hash: String,
+        actual_hash: String,
+    },
+
+    #[snafu(display("HarvestMap-Data needs to be installed before updating pin data"))]
+    HarvestMapDataNotInstalled,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

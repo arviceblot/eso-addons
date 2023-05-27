@@ -35,6 +35,11 @@ impl fmt::Display for Sort {
         }
     }
 }
+impl Default for Sort {
+    fn default() -> Self {
+        Self::Id
+    }
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]

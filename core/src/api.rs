@@ -96,6 +96,19 @@ impl ApiClient {
         Ok(res)
     }
 
+    pub async fn get_hm_data(&self, data: String) -> Result<Response> {
+        let url = "http://harvestmap.binaryvector.net:8081";
+        let res = self
+            .client
+            .post(url)
+            .body(data)
+            .send()
+            .await
+            .context(error::ApiGetUrlSnafu { url })
+            .unwrap();
+        Ok(res)
+    }
+
     async fn get_game_config(&mut self) -> Result<()> {
         let res = self.req_url::<EsoApiFeeds>(&self.game_config_url).await?;
         self.file_list_url = res.api_feeds.file_list;

@@ -1,10 +1,14 @@
-use crate::error::{self, Result};
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::io::{self, Seek, Write};
+use std::path::{Path, PathBuf};
 
+use self::fs_util::{fs_delete_addon, fs_read_addon};
+use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
 use crate::config::{self, Config};
+use crate::error::{self, AddonDownloadHashSnafu, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
@@ -13,27 +17,21 @@ use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::installed_addon as InstalledAddon;
 use entity::manual_dependency as ManualDependency;
-use lazy_async_promise::{DirectCacheAccess, ImmediateValuePromise, ImmediateValueState};
 use migration::{Condition, Migrator, MigratorTrait};
-use sea_orm::sea_query::{Expr, OnConflict, Query};
+
+use bbcode_tagger::{BBCode, BBTree};
+use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use md5::{Digest, Md5};
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbBackend,
     DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, Statement,
 };
-use snafu::ResultExt;
-use std::io::{self, Seek, Write};
-use std::path::PathBuf;
-use std::sync::Arc;
+use snafu::{ensure, ResultExt};
 use tempfile::NamedTempFile;
-use tokio::sync::Mutex;
 use tracing::log::{self, info};
 use zip::ZipArchive;
-
-use self::fs_util::{fs_delete_addon, fs_read_addon};
-use self::result::*;
-
-use bbcode_tagger::{BBCode, BBTree};
 
 mod fs_util;
 pub mod result;
@@ -63,8 +61,7 @@ impl AddonService {
             let mut client = ApiClient::new("https://api.mmoui.com/v3");
             if config.file_list.is_empty() {
                 client.update_endpoints().await.unwrap();
-            }
-            else {
+            } else {
                 client.update_endpoints_from_config(&config);
             }
 
@@ -83,7 +80,6 @@ impl AddonService {
                 api: client,
                 config,
                 db,
-                ..Default::default()
             })
         })
     }
@@ -96,71 +92,75 @@ impl AddonService {
         })
     }
     async fn p_install(&self, addon_id: i32, update: bool) -> Result<()> {
-            self.p_update_addon_details(addon_id).await.unwrap();
-            let entry = DbAddon::Entity::find_by_id(addon_id)
-                .one(&self.db)
-                .await
-                .context(error::DbGetSnafu)?;
-            let entry = entry.unwrap();
-            let installed_entry = InstalledAddon::Entity::find_by_id(addon_id)
-                .one(&self.db)
-                .await
-                .context(error::DbGetSnafu)?;
+        self.p_update_addon_details(addon_id).await.unwrap();
+        let entry = DbAddon::Entity::find_by_id(addon_id)
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)?;
+        let entry = entry.unwrap();
+        let installed_entry = InstalledAddon::Entity::find_by_id(addon_id)
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)?;
 
-            if let Some(installed_entry) = installed_entry {
-                if installed_entry.version == entry.version && !update {
-                    info!("Addon {} is already installed and up to date", entry.name);
-                    return Ok(());
-                }
+        if let Some(installed_entry) = installed_entry {
+            if installed_entry.version == entry.version && !update {
+                info!("Addon {} is already installed and up to date", entry.name);
+                return Ok(());
             }
+        }
 
-            if update {
-                info!("Updating addon: {}", addon_id);
-            } else {
-                info!("Installing addon: {}", addon_id);
-            }
+        if update {
+            info!("Updating addon: {}", addon_id);
+        } else {
+            info!("Installing addon: {}", addon_id);
+        }
 
-            let installed = self.fs_download_addon(entry.download.as_ref().unwrap().as_str()).await?;
-            let installed_entry = InstalledAddon::ActiveModel {
+        let installed = self
+            .fs_download_addon(entry.download.as_ref().unwrap().as_str(), entry.md5)
+            .await?;
+        let installed_entry = InstalledAddon::ActiveModel {
+            addon_id: ActiveValue::Set(addon_id),
+            version: ActiveValue::Set(entry.version.to_string()),
+            date: ActiveValue::Set(entry.date.to_string()),
+        };
+
+        let result = InstalledAddon::Entity::insert(installed_entry)
+            .on_conflict(
+                OnConflict::column(InstalledAddon::Column::AddonId)
+                    .update_columns([
+                        InstalledAddon::Column::Date,
+                        InstalledAddon::Column::Version,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await;
+        check_db_result(result)?;
+
+        // get addon IDs from dependency dirs, there may be more than on for each directory
+        if !installed.depends_on.is_empty() {
+            let deps = installed.depends_on.iter().map(|x| AddonDep::ActiveModel {
                 addon_id: ActiveValue::Set(addon_id),
-                version: ActiveValue::Set(entry.version.to_string()),
-                date: ActiveValue::Set(entry.date.to_string()),
-            };
-
-            let result = InstalledAddon::Entity::insert(installed_entry)
+                dependency_dir: ActiveValue::Set(x.to_owned()),
+            });
+            // insert all dependencies
+            let result = AddonDep::Entity::insert_many(deps)
                 .on_conflict(
-                    OnConflict::column(InstalledAddon::Column::AddonId)
-                        .update_columns([
-                            InstalledAddon::Column::Date,
-                            InstalledAddon::Column::Version,
-                        ])
-                        .to_owned(),
+                    OnConflict::columns([
+                        AddonDep::Column::AddonId,
+                        AddonDep::Column::DependencyDir,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
                 )
                 .exec(&self.db)
                 .await;
             check_db_result(result)?;
+        }
 
-            // get addon IDs from dependency dirs, there may be more than on for each directory
-            if !installed.depends_on.is_empty() {
-                let deps = installed.depends_on.iter().map(|x| AddonDep::ActiveModel {
-                    addon_id: ActiveValue::Set(addon_id),
-                    dependency_dir: ActiveValue::Set(x.to_owned()),
-                });
-                // insert all dependencies
-                let result = AddonDep::Entity::insert_many(deps)
-                    .on_conflict(
-                        OnConflict::columns([
-                            AddonDep::Column::AddonId,
-                            AddonDep::Column::DependencyDir,
-                        ])
-                        .do_nothing()
-                        .to_owned(),
-                    )
-                    .exec(&self.db)
-                    .await;
-                check_db_result(result)?;
-            }
-            Ok(())
+        // TODO: check missing depenency options after install
+        Ok(())
     }
 
     pub async fn upgrade(&mut self) -> Result<UpdateResult> {
@@ -193,7 +193,7 @@ impl AddonService {
         }
         let need_installs = self.get_missing_dependency_options().await;
 
-        let mut result = UpdateResult {
+        let result = UpdateResult {
             missing_deps: need_installs,
             ..Default::default()
         };
@@ -205,8 +205,8 @@ impl AddonService {
         let mut service = self.clone();
         ImmediateValuePromise::new(async move {
             // update endpoints from api
-            info!("Updating endpoints");
-            service.api.update_endpoints().await.unwrap();
+            // info!("Updating endpoints");
+            // service.api.update_endpoints().await.unwrap();
 
             // update categories
             service.update_categories().await?;
@@ -327,41 +327,52 @@ impl AddonService {
     }
 
     async fn p_update_addon_details(&self, id: i32) -> Result<()> {
-            info!("Updating addon details for addon: {}", id);
+        // check addon_detail not present or out of date
+        let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
+        let addon_detail = AddonDetail::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .unwrap();
+        if addon.is_some()
+            && addon_detail.is_some()
+            && addon.unwrap().version == addon_detail.unwrap().version.unwrap_or_default()
+        {
+            // no need to update
+            return Ok(());
+        }
 
-            let file_details = self.api.get_file_details(id).await?;
-            let record = AddonDetail::ActiveModel {
-                id: ActiveValue::Set(id),
-                description: ActiveValue::Set(Some(file_details.description)),
-                change_log: ActiveValue::Set(Some(file_details.change_log)),
-                version: ActiveValue::Set(Some(file_details.version)),
-            };
+        info!("Updating addon details for addon: {}", id);
 
-            let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
-            let mut active: DbAddon::ActiveModel = addon.unwrap().into_active_model();
-            active.md5 = Set(Some(file_details.md5.to_owned()));
-            active.file_name = Set(Some(file_details.file_name.to_owned()));
-            active.download = Set(Some(file_details.download_url.to_owned()));
-            active
-                .update(&self.db)
-                .await
-                .context(error::DbPutSnafu)?;
+        let file_details = self.api.get_file_details(id).await?;
+        let record = AddonDetail::ActiveModel {
+            id: ActiveValue::Set(id),
+            description: ActiveValue::Set(Some(file_details.description)),
+            change_log: ActiveValue::Set(Some(file_details.change_log)),
+            version: ActiveValue::Set(Some(file_details.version)),
+        };
 
-            AddonDetail::Entity::insert(record)
-                .on_conflict(
-                    OnConflict::column(AddonDetail::Column::Id)
-                        .update_columns([
-                            AddonDetail::Column::Description,
-                            AddonDetail::Column::ChangeLog,
-                            AddonDetail::Column::Version,
-                        ])
-                        .to_owned(),
-                )
-                .exec(&self.db)
-                .await
-                .context(error::DbPutSnafu)?;
+        let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
+        let mut active: DbAddon::ActiveModel = addon.unwrap().into_active_model();
+        active.md5 = Set(Some(file_details.md5.to_owned()));
+        active.file_name = Set(Some(file_details.file_name.to_owned()));
+        active.download = Set(Some(file_details.download_url.to_owned()));
+        active.update(&self.db).await.context(error::DbPutSnafu)?;
 
-            Ok(())
+        AddonDetail::Entity::insert(record)
+            .on_conflict(
+                OnConflict::column(AddonDetail::Column::Id)
+                    .update_columns([
+                        AddonDetail::Column::Description,
+                        AddonDetail::Column::ChangeLog,
+                        AddonDetail::Column::Version,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
+
+        Ok(())
     }
     pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
         let service = self.clone();
@@ -598,81 +609,116 @@ impl AddonService {
         self.config.addon_dir.clone()
     }
 
-    async fn base_fs_download_extract(&self, url: &str, path_addr: Option<&str>) -> Result<ZipArchive<File>>{
-            let response = tokio::join!(async move {self.api.download_file(url).await.unwrap().bytes().await.unwrap()}).0;
+    async fn base_fs_download_extract(
+        &self,
+        url: &str,
+        path_addr: Option<&str>,
+        md5: Option<String>,
+    ) -> Result<ZipArchive<File>> {
+        let response = tokio::join!(async move {
+            self.api
+                .download_file(url)
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap()
+        })
+        .0;
 
-            let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
-            let mut r_tmpfile = tmpfile
-                .reopen()
-                .context(error::AddonDownloadTmpFileReadSnafu)?;
-            tmpfile
-                .write_all(response.as_ref())
-                .context(error::AddonDownloadTmpFileWriteSnafu)?;
-            r_tmpfile.rewind().unwrap();
+        let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
+        let mut r_tmpfile = tmpfile
+            .reopen()
+            .context(error::AddonDownloadTmpFileReadSnafu)?;
+        tmpfile
+            .write_all(response.as_ref())
+            .context(error::AddonDownloadTmpFileWriteSnafu)?;
+        r_tmpfile.rewind().unwrap();
 
-            let mut archive =
-                zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
-
-            for i in 0..archive.len() {
-                let mut file = archive
-                    .by_index(i)
-                    .context(error::AddonDownloadZipReadSnafu { file: i })?;
-                let outpath = match file.enclosed_name() {
-                    Some(path) => {
-                        let mut p = self.get_addon_dir().clone();
-                        if path_addr.is_some() {
-                            // append additional path if defined
-                            p.push(path_addr.unwrap());
-                        }
-                        p.push(path);
-                        p
-                    }
-
-                    None => continue,
-                };
-
-                if (file.name()).ends_with('/') {
-                    fs::create_dir_all(&outpath)
-                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
-                } else {
-                    if let Some(p) = outpath.parent() {
-                        if !p.exists() {
-                            fs::create_dir_all(p)
-                                .context(error::AddonDownloadZipExtractSnafu { path: p })?;
-                        }
-                    }
-                    let mut outfile = fs::File::create(&outpath).context(
-                        error::AddonDownloadZipExtractSnafu {
-                            path: outpath.to_owned(),
-                        },
-                    )?;
-                    io::copy(&mut file, &mut outfile)
-                        .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
-                }
+        // check hash if present
+        if let Some(md5) = md5 {
+            let mut hasher = Md5::new();
+            io::copy(&mut r_tmpfile, &mut hasher).unwrap();
+            let hash = hasher.finalize().to_vec();
+            let mut hash_string = String::new();
+            for x in hash.iter() {
+                hash_string.push_str(format!("{:02x}", x).as_str());
             }
+            ensure!(
+                md5 == hash_string,
+                AddonDownloadHashSnafu {
+                    file_name: String::from(url),
+                    expected_hash: md5,
+                    actual_hash: hash_string
+                }
+            );
+            r_tmpfile.rewind().unwrap();
+        }
 
-            Ok(archive)
+        let mut archive =
+            zip::ZipArchive::new(r_tmpfile).context(error::AddonDownloadZipCreateSnafu)?;
+
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .context(error::AddonDownloadZipReadSnafu { file: i })?;
+            let outpath = match file.enclosed_name() {
+                Some(path) => {
+                    let mut p = self.get_addon_dir().clone();
+                    if path_addr.is_some() {
+                        // append additional path if defined
+                        p.push(path_addr.unwrap());
+                    }
+                    p.push(path);
+                    p
+                }
+
+                None => continue,
+            };
+
+            if (file.name()).ends_with('/') {
+                fs::create_dir_all(&outpath)
+                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
+            } else {
+                if let Some(p) = outpath.parent() {
+                    if !p.exists() {
+                        fs::create_dir_all(p)
+                            .context(error::AddonDownloadZipExtractSnafu { path: p })?;
+                    }
+                }
+                let mut outfile =
+                    fs::File::create(&outpath).context(error::AddonDownloadZipExtractSnafu {
+                        path: outpath.to_owned(),
+                    })?;
+                io::copy(&mut file, &mut outfile)
+                    .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
+            }
+        }
+
+        Ok(archive)
     }
 
-    async fn fs_download_addon(&self, url: &str) -> Result<Addon> {
-            let mut archive = self.base_fs_download_extract(url, None).await?;
-            let mut addon_path = self.get_addon_dir();
-            let addon_name = archive
-                .by_index(0)
-                .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
-            let addon_name = get_root_dir(&addon_name.mangled_name());
-            addon_path.push(addon_name);
+    async fn fs_download_addon(&self, url: &str, md5: Option<String>) -> Result<Addon> {
+        let mut archive = self.base_fs_download_extract(url, None, md5).await?;
+        let mut addon_path = self.get_addon_dir();
+        let addon_name = archive
+            .by_index(0)
+            .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
+        let addon_name = get_root_dir(&addon_name.mangled_name());
+        addon_path.push(addon_name);
 
-            let addon = fs_read_addon(&addon_path);
+        let addon = fs_read_addon(&addon_path);
 
-            Ok(addon.unwrap())
+        Ok(addon.unwrap())
     }
 
     pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            service.base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre")).await?;
+            service
+                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
+                .await?;
             Ok(())
         })
     }
@@ -759,7 +805,10 @@ impl AddonService {
         })
     }
 
-    pub fn get_addons_by_category(&self, category_id: i32) -> ImmediateValuePromise<Vec<AddonShowDetails>>{
+    pub fn get_addons_by_category(
+        &self,
+        category_id: i32,
+    ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
             let mut addons = DbAddon::Entity::find()
@@ -796,36 +845,96 @@ impl AddonService {
     ) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
-            let mut dep_inserts = vec!();
+            let mut dep_inserts = vec![];
             // install selected IDs if not installed
             for dep_opt in dep_results.iter() {
+                let mut dep_insert = ManualDependency::ActiveModel {
+                    addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
+                    ignore: ActiveValue::Set(None),
+                    satisfied_by: ActiveValue::Set(None),
+                };
                 if let Some(satisfied_by) = dep_opt.satisfied_by {
                     // if it's in the options, it means not installed
                     if dep_opt.options.contains_key(&satisfied_by) {
                         // install addon
                         service.p_install(satisfied_by, false).await.unwrap();
-                        dep_inserts.push(ManualDependency::ActiveModel {
-                            addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
-                            ignore: ActiveValue::Set(Some(dep_opt.ignore)),
-                            satisfied_by: ActiveValue::Set(Some(satisfied_by)),
-                        });
                     }
+                    dep_insert.satisfied_by = ActiveValue::Set(Some(satisfied_by));
                 }
+                dep_insert.ignore = ActiveValue::Set(Some(dep_opt.ignore));
+                dep_inserts.push(dep_insert);
             }
             // insert dep options
             ManualDependency::Entity::insert_many(dep_inserts)
                 .on_conflict(
-                    OnConflict::column(
-                        ManualDependency::Column::AddonDir
-                    )
-                    .update_columns([
-                        ManualDependency::Column::Ignore,
-                        ManualDependency::Column::SatisfiedBy
-                    ])
-                    .to_owned(),
+                    OnConflict::column(ManualDependency::Column::AddonDir)
+                        .update_columns([
+                            ManualDependency::Column::Ignore,
+                            ManualDependency::Column::SatisfiedBy,
+                        ])
+                        .to_owned(),
                 )
                 .exec(&service.db)
                 .await?;
+            Ok(())
+        })
+    }
+
+    pub fn update_hm_data(&self) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        let config = self.config.clone();
+        let api = self.api.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Updating HarvestMap data...");
+            // ensure HarvestMap-Data installed (id: 3034)
+            const HMD_ID: i32 = 3034;
+
+            let hmd_addon = InstalledAddon::Entity::find_by_id(HMD_ID)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            ensure!(hmd_addon.is_some(), error::HarvestMapDataNotInstalledSnafu);
+
+            let base_dir = config.addon_dir.parent().unwrap();
+            let saved_var_dir = base_dir.join("SavedVariables");
+            let addon_dir = config.addon_dir.join("HarvestMapData");
+            let mut empty_file = addon_dir.join("Main");
+            empty_file.push("emptyTable.lua");
+
+            let empty_file_data = fs::read_to_string(empty_file)?;
+
+            // iterate over the different zones
+            for zone in ["AD", "EP", "DC", "DLC", "NF"] {
+                let file_name = format!("HarvestMap{zone}.lua");
+                info!("Working on {file_name}...");
+
+                let sv_fn1 = saved_var_dir.join(file_name.clone());
+                let sv_fn2 = saved_var_dir.join(format!("{file_name}~"));
+
+                // if save var file exists, create backup...
+                if sv_fn1.exists() {
+                    fs::copy(sv_fn1, sv_fn2.clone())?;
+                } else {
+                    // ... else, use empty table to create a placeholder
+                    let file_data = format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str());
+                    let mut output = File::create(sv_fn2.clone())?;
+                    write!(output, "{}", file_data)?;
+                }
+
+                let sv_fn2_data = fs::read_to_string(sv_fn2).unwrap();
+                let result = api.get_hm_data(sv_fn2_data).await.unwrap();
+
+                let mut out_file = addon_dir.join("Modules");
+                out_file.push(format!("HarvestMap{zone}"));
+                if !out_file.exists() {
+                    // create modules zone dir
+                    fs::create_dir(out_file.clone()).unwrap();
+                }
+                out_file.push(file_name);
+                let mut output = File::create(out_file)?;
+                write!(output, "{}", result.text().await.unwrap()).unwrap();
+            }
+            info!("Done HarvestMap data!");
             Ok(())
         })
     }

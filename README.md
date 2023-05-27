@@ -6,19 +6,14 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online designed
 
 ## Features
 
-- GUI and CLI options
+- GUI ~~and CLI options~~ (CLI disabled due to breaking changes to support GUI)
 - Install, remove, and search addons from [esoui.com](https://www.esoui.com)
 - Cross-platform support for Linux, macOS, and Windows
 - Specific support for ESO on the Steam Deck through AppImage
-- Option to update Tamriel Trade Centre prices
+- Options to auto update Tamriel Trade Centre prices and HarvestMap data
 - No Java!
 - Import managed addons from Minion
-
-### Planned Features
-
-- Show additional addon details in search
-- Browse all addons by category and other filters
-- Import already installed addons to manage (without Minion backup)
+- Suggest installing addons for any missing depenencies
 
 ## Installing
 
@@ -36,11 +31,9 @@ cargo install --git https://github.com/arviceblot/eso-addons.git
 
 ## Running
 
-Run the app.
-
 ### AppImage with AppImageLauncher
 
-TODO:
+If the app was installed through AppImageLauncher, it should have automatically created a desktop entry. This can be added to steam as a non-steam game in desktop mode where it can then be launched in game mode. The app can be closed in game mode using the steam app menu.
 
 ### CLI
 
@@ -66,6 +59,14 @@ SUBCOMMANDS:
     show      Show addon details
     update    Update addons
 ```
+
+## Updating
+
+TODO: cargo
+
+### AppImage
+
+AppImageLauncher has the option to automatically install updates, this app has been designed to take advantage of that using GitHub release information.
 
 ## Legacy
 
