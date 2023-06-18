@@ -34,7 +34,7 @@ pub fn fs_get_addons(addon_dir: &PathBuf) -> Result<AddonList> {
 
     // Ok(fs::metadata(addon_dir));
 
-    fs::metadata(&addon_dir).context(error::AddonDirMetadataSnafu { dir: &addon_dir })?;
+    fs::metadata(addon_dir).context(error::AddonDirMetadataSnafu { dir: &addon_dir })?;
 
     for entry in WalkDir::new(addon_dir) {
         let entry_dir = entry.unwrap();
@@ -109,7 +109,6 @@ pub fn fs_read_addon(path: &Path) -> Result<Addon> {
                 Some(ref captures) => captures[2]
                     .split(' ')
                     .map(|s| s.to_owned())
-                    .into_iter()
                     .filter_map(|s| extract_dependency(&s))
                     .collect(),
                 None => vec![],

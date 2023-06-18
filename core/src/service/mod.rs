@@ -563,8 +563,7 @@ impl AddonService {
         left outer join addon a on ad.addon_id = a.id
         left outer join manual_dependency m on dependency_dir = m.addon_dir
         where
-            m.addon_dir is NULL
-            or m.ignore <> 1"#,
+            dependency_dir not in (select addon_dir from manual_dependency)"#,
             [],
         ))
         .all(&self.db)
