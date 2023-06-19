@@ -30,7 +30,7 @@ path = "src/main.rs"
 eframe = "0.22.0"
 tokio = { version = "1", features = ["full"] }
 eso-addons-core = { path = "./core" }
-strum = "0.24.1"
+strum = "0.25.0"
 strum_macros = "0.24.3"
 egui_file = "0.9.0"
 itertools = "0.10.5"
