@@ -90,7 +90,6 @@ impl View for Details {
 
         // ui.vertical_centered_justified(|ui| {
         ScrollArea::vertical().show(ui, |ui| {
-            // TODO: add BBCode parsing for description and changelog text
             if !self.show_changelog {
                 // show details
                 if self.parsed_description.is_ready() && !self.show_raw_text {

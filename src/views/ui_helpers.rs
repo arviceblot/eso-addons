@@ -315,7 +315,12 @@ fn ui_handle_text(ui: &mut egui::Ui, node: &BBNode, i: i32, parent_nodes: &[BBNo
             BBTag::Strikethrough => {
                 text_fmt.strikethrough = Stroke::new(1.0, text_fmt.color);
             }
-            BBTag::FontColor => {}
+            BBTag::FontColor => {
+                // if n.value.is_some_and(|x| x.starts_with("#")) {
+                // let text_color = node.value.unwrap().as_str();
+                // text_fmt.color = hex_color!(text_color);
+                // }
+            }
             BBTag::FontSize => {
                 if let Some(size) = &node.value {
                     match size.as_str() {

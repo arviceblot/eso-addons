@@ -46,7 +46,7 @@ impl View for Settings {
         if let Some(dialog) = &mut self.open_addon_dir_dialog {
             if dialog.show(ctx).selected() {
                 if let Some(dir) = dialog.path() {
-                    service.config.addon_dir = dir;
+                    service.config.addon_dir = dir.to_path_buf();
                     service.save_config();
                 }
             }
@@ -88,7 +88,7 @@ impl View for Settings {
         if let Some(dialog) = &mut self.open_file_dialog {
             if dialog.show(ctx).selected() {
                 if let Some(file) = dialog.path() {
-                    self.opened_file = Some(file);
+                    self.opened_file = Some(file.to_path_buf());
                     let mut promise = PromisedValue::<()>::default();
                     promise.set(service.import_minion_file(self.opened_file.as_ref().unwrap()));
                     self.minion_import = Some(promise);

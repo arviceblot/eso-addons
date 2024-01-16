@@ -33,7 +33,7 @@ impl View for Onboard {
         if let Some(dialog) = &mut self.open_addon_dir_dialog {
             if dialog.show(ctx).selected() {
                 if let Some(dir) = dialog.path() {
-                    service.config.addon_dir = dir;
+                    service.config.addon_dir = dir.to_path_buf();
                     service.save_config();
                     self.addon_dir_set = true;
                 }

@@ -29,7 +29,7 @@ async fn main() -> Result<(), eframe::Error> {
         .init();
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(960.0, 600.0)),
+        viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(APP_NAME, options, Box::new(|_cc| Box::<EamApp>::default()))
@@ -99,11 +99,11 @@ impl EamApp {
 }
 
 impl eframe::App for EamApp {
-    fn on_close_event(&mut self) -> bool {
-        self.service.value.as_mut().unwrap().save_config();
-        true
-    }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // save config before closing
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.service.value.as_mut().unwrap().save_config();
+        }
         ctx.request_repaint_after(Duration::new(1, 0));
         egui::TopBottomPanel::top("main_top").show(ctx, |ui| {
             ui.horizontal(|ui| {

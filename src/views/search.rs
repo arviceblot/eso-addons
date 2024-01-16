@@ -99,9 +99,7 @@ impl View for Search {
             });
         }
 
-        if self.results.value.is_none() {
-            return None;
-        }
+        self.results.value.as_ref()?;
 
         let mut addon_id = None;
         ui.vertical_centered_justified(|ui| {
