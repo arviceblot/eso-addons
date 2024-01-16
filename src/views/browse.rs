@@ -123,9 +123,8 @@ impl View for Browse {
                     .show(ui, |ui| {
                         // only show not-installed addons in search results
                         for addon in self.displayed_addons.value.as_ref().unwrap().iter() {
-                            let selected = ui_show_addon_item(ui, addon);
-                            if selected.is_some() {
-                                addon_id = selected;
+                            if ui_show_addon_item(ui, addon).unwrap().clicked() {
+                                addon_id = Some(addon.id);
                             }
                             ui.horizontal_centered(|ui| {
                                 if !addon.installed && ui.button("Install").clicked() {

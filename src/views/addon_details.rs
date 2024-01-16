@@ -14,6 +14,7 @@ pub struct Details {
     parsed_description: PromisedValue<BBTree>,
     parsed_changelog: PromisedValue<BBTree>,
     show_changelog: bool,
+    show_raw_text: bool,
 }
 
 impl Details {
@@ -83,6 +84,7 @@ impl View for Details {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.show_changelog, false, "Details");
             ui.selectable_value(&mut self.show_changelog, true, "Change Log");
+            ui.checkbox(&mut self.show_raw_text, "Show Unformatted Text");
         });
         ui.separator();
 
@@ -91,12 +93,12 @@ impl View for Details {
             // TODO: add BBCode parsing for description and changelog text
             if !self.show_changelog {
                 // show details
-                if self.parsed_description.is_ready() {
+                if self.parsed_description.is_ready() && !self.show_raw_text {
                     ui_show_bbtree(ui, self.parsed_description.value.as_ref().unwrap());
                 } else {
                     ui.label(addon.description.as_ref().unwrap_or(&"".to_string()));
                 }
-            } else if self.parsed_changelog.is_ready() {
+            } else if self.parsed_changelog.is_ready() && !self.show_raw_text {
                 ui_show_bbtree(ui, self.parsed_changelog.value.as_ref().unwrap());
             } else {
                 ui.label(addon.change_log.as_ref().unwrap_or(&"".to_string()));

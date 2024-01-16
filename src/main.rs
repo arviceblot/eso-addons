@@ -4,6 +4,7 @@ use eso_addons_core::service::AddonService;
 use std::time::Duration;
 use views::View;
 
+// mod service_manager;
 mod views;
 
 use views::addon_details::Details;
@@ -104,6 +105,14 @@ impl eframe::App for EamApp {
     }
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(Duration::new(1, 0));
+        egui::TopBottomPanel::top("main_top").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
+                ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
+                ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
+                ui.selectable_value(&mut self.view, ViewOpt::Settings, "Settings");
+            });
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             if !self.service.is_ready() {
                 self.service.poll();
@@ -136,13 +145,6 @@ impl eframe::App for EamApp {
                 return;
             }
 
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.view, ViewOpt::Installed, "Installed");
-                ui.selectable_value(&mut self.view, ViewOpt::Search, "Search");
-                ui.selectable_value(&mut self.view, ViewOpt::Browse, "Browse");
-                ui.selectable_value(&mut self.view, ViewOpt::Settings, "Settings");
-            });
-            ui.separator();
             self.check_view_update();
 
             let addon_id: Option<i32> = match self.view {

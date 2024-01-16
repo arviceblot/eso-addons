@@ -519,9 +519,9 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "bbcode-tagger"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c7d3196248ad1778a53b8f4f43d678adb4860d611ce2a500a4a4ca1c9f2e9ef"
+checksum = "49d232687d86c4ff15aceb45cda3f8f5050110b12268f86b29b60e46142fa0a7"
 dependencies = [
  "regex",
 ]
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "eso-addon-manager"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "bbcode-tagger",
  "dotenv",
@@ -1496,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "eso-addons-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bbcode-tagger",
  "chrono",

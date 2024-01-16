@@ -114,9 +114,8 @@ impl View for Search {
                             let results = self.results.value.as_ref().unwrap().to_owned();
                             // only show not-installed addons in search results
                             for addon in results.iter().filter(|x| !x.installed) {
-                                let selected = ui_show_addon_item(ui, addon);
-                                if selected.is_some() {
-                                    addon_id = selected;
+                                if ui_show_addon_item(ui, addon).unwrap().clicked() {
+                                    addon_id = Some(addon.id);
                                 }
                                 // ui.horizontal_centered(|ui| {
                                 if self.is_installing_addon(addon.id) {

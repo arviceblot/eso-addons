@@ -60,7 +60,7 @@ pub struct AddonDetails {
     pub installed: bool,
 }
 
-#[derive(FromQueryResult, Clone, Default)]
+#[derive(FromQueryResult, Clone, Default, Debug)]
 pub struct AddonShowDetails {
     pub id: i32,
     pub name: String,

@@ -3,7 +3,7 @@ use std::fmt;
 use tracing::log::error;
 
 use eframe::{
-    egui::{self, RichText, TextFormat},
+    egui::{self, Label, Response, RichText, TextFormat},
     emath::Align,
     epaint::{text::LayoutJob, Color32, FontId, Stroke},
 };
@@ -58,6 +58,14 @@ pub struct PromisedValue<T: Send + Clone + Default + 'static> {
     handled: bool,
 }
 impl<T: Send + Clone + Default> PromisedValue<T> {
+    pub fn new(value_promise: ImmediateValuePromise<T>) -> Self {
+        Self {
+            promise: Some(value_promise),
+            value: None,
+            handled: false,
+        }
+    }
+
     pub fn poll(&mut self) {
         if self.promise.is_none() {
             return;
@@ -96,19 +104,15 @@ impl<T: Send + Clone + Default> PromisedValue<T> {
     }
 }
 
-pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option<i32> {
+pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option<Response> {
     // col1:
     // addon_name, author
     // category
-    let mut return_id = None;
+    let mut response = None;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            if ui
-                .selectable_label(false, RichText::new(addon.name.as_str()).strong())
-                .clicked()
-            {
-                return_id = Some(addon.id);
-            }
+            response =
+                Some(ui.selectable_label(false, RichText::new(addon.name.as_str()).strong()));
             ui.label(RichText::new(format!("by: {}", addon.author_name.as_str())).small());
         });
         ui.label(RichText::new(addon.category.as_str()).small());
@@ -129,7 +133,7 @@ pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option
             if addon.download_total.is_some() {
                 // "⮋" downloads
                 ui.add(
-                    egui::Label::new(format!(
+                    Label::new(format!(
                         "⮋ {}",
                         addon.download_total.as_ref().unwrap().as_str()
                     ))
@@ -139,7 +143,7 @@ pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option
             // "♥" favorites
             if addon.favorite_total.is_some() {
                 ui.add(
-                    egui::Label::new(format!(
+                    Label::new(format!(
                         "♥ {}",
                         addon.favorite_total.as_ref().unwrap().as_str()
                     ))
@@ -147,10 +151,10 @@ pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option
                 );
             }
             // "🔃" version
-            ui.add(egui::Label::new(format!("🔃 {}", addon.version)).wrap(false));
+            ui.add(Label::new(format!("🔃 {}", addon.version)).wrap(false));
         }
     });
-    return_id
+    response
 }
 
 pub fn ui_show_bbtree(ui: &mut egui::Ui, tree: &BBTree) {
@@ -298,11 +302,6 @@ fn ui_handle_text(ui: &mut egui::Ui, node: &BBNode, i: i32, parent_nodes: &[BBNo
 
     // tag on the current node to apply the same formatting
     for n in parent_nodes.iter().chain([node]) {
-        // if *tag == BBTag::Bold {
-        //     text.strong();
-        // } else if *tag == BBTag::Italic {
-        //     text.italics();
-        // }
         match n.tag {
             BBTag::Bold => {
                 text_fmt.color = strong_color;
@@ -345,7 +344,7 @@ fn ui_handle_text(ui: &mut egui::Ui, node: &BBNode, i: i32, parent_nodes: &[BBNo
                 text_fmt.font_id = FontId::proportional(7.0);
                 text_fmt.valign = Align::BOTTOM;
             }
-            _ => {} //Ok(text),
+            _ => {}
         };
     }
     job.append(node.text.as_str(), 0.0, text_fmt);

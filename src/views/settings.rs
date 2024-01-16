@@ -60,10 +60,11 @@ impl View for Settings {
                 .to_str()
                 .unwrap(),
         );
-        ui.checkbox(
-            &mut service.config.update_on_launch,
-            "Check for updates on launch",
-        );
+        // ui.checkbox(
+        //     // TODO: make this mean something, currently has no effect
+        //     &mut service.config.update_on_launch,
+        //     "Check for updates on launch",
+        // );
         ui.checkbox(
             &mut service.config.update_ttc_pricetable,
             "Update TTC PriceTable on launch (requires TamrielTradeCentre to be installed)",
@@ -83,14 +84,14 @@ impl View for Settings {
         } else {
             ui.add_enabled(false, egui::Button::new("Importing..."));
             ui.spinner();
-            if let Some(dialog) = &mut self.open_file_dialog {
-                if dialog.show(ctx).selected() {
-                    if let Some(file) = dialog.path() {
-                        self.opened_file = Some(file);
-                        let mut promise = PromisedValue::<()>::default();
-                        promise.set(service.import_minion_file(self.opened_file.as_ref().unwrap()));
-                        self.minion_import = Some(promise);
-                    }
+        }
+        if let Some(dialog) = &mut self.open_file_dialog {
+            if dialog.show(ctx).selected() {
+                if let Some(file) = dialog.path() {
+                    self.opened_file = Some(file);
+                    let mut promise = PromisedValue::<()>::default();
+                    promise.set(service.import_minion_file(self.opened_file.as_ref().unwrap()));
+                    self.minion_import = Some(promise);
                 }
             }
         }
