@@ -2,11 +2,8 @@ use dotenv::dotenv;
 use eframe::egui;
 use eso_addons_core::service::AddonService;
 use std::time::Duration;
-use views::View;
 
-// mod service_manager;
 mod views;
-
 use views::addon_details::Details;
 use views::browse::Browse;
 use views::installed::Installed;
@@ -15,6 +12,7 @@ use views::onboard::Onboard;
 use views::search::Search;
 use views::settings::Settings;
 use views::ui_helpers::{PromisedValue, ViewOpt};
+use views::View;
 
 const APP_NAME: &str = "ESO Addon Manager";
 pub const REPO: Option<&str> = option_env!("CARGO_PKG_REPOSITORY");
@@ -94,6 +92,7 @@ impl EamApp {
                 self.selected_addon.unwrap(),
                 self.service.value.as_mut().unwrap(),
             );
+            self.view = ViewOpt::Details;
         }
     }
 }
@@ -138,6 +137,8 @@ impl eframe::App for EamApp {
                 // show addon details view
                 if ui.button("Close").clicked() {
                     self.selected_addon = None;
+                    self.view = self.prev_view;
+                    self.prev_view = ViewOpt::Details;
                     return;
                 }
                 self.details

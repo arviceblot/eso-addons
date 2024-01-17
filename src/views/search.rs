@@ -115,13 +115,11 @@ impl View for Search {
                                 if ui_show_addon_item(ui, addon).unwrap().clicked() {
                                     addon_id = Some(addon.id);
                                 }
-                                // ui.horizontal_centered(|ui| {
                                 if self.is_installing_addon(addon.id) {
                                     ui.add_enabled(false, egui::Button::new("Installing..."));
                                 } else if ui.button("Install").clicked() {
                                     self.install_addon(addon.id, service);
                                 }
-                                // });
                                 ui.end_row();
                             }
                         });

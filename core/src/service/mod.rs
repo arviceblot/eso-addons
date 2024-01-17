@@ -38,10 +38,15 @@ pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 
-pub enum ServiceResult {
-    Default(()),
-    AddonShowDetails(Vec<AddonShowDetails>),
-    ZipFile(ZipArchive<File>),
+#[derive(Debug)]
+enum AddonPromiseType {
+    UpdateResult,
+}
+type AddonPromise = HashMap<i32, ImmediateValuePromise<AddonPromiseType>>;
+#[derive(Debug)]
+enum PromiseType {
+    Install,
+    UpdateDetails,
 }
 
 #[derive(Debug, Clone, Default)]

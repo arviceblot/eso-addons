@@ -30,7 +30,9 @@
             "build-commands": [
                 "cargo --offline fetch --manifest-path Cargo.toml --verbose",
                 "cargo --offline build --release --verbose",
-                "install -Dm755 ./target/release/eso-addon-manager -t /app/bin/"
+                "install -Dm755 ./target/release/eso-addon-manager -t /app/bin/",
+                "install -Dm644 ./data/${FLATPAK_ID}.desktop -t /app/share/applications/",
+                "install -Dm644 ./data/${FLATPAK_ID}.svg -t /app/share/icons/hicolor/scalable/apps/"
             ],
             "sources": [
                 {

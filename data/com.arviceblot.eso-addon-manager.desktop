@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=ESO AddOn Manager
+Exec=eso-addon-manager
+Type=Application
+Icon=com.arviceblot.eso-addon-manager

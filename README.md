@@ -1,6 +1,6 @@
 # ESO Addon Manager
 
-A cross-platform, unofficial addon manager for The Elder Scrolls Online designed for the Steam Deck.
+A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.
 
 ![Image of main window](/docs/images/main.png)
 
