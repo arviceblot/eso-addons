@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.arviceblot.eso_addon_manager</id>
+
+  <name>ESO AddOn Manager</name>
+  <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      Features
+    </p>
+    <p>
+      - Install, remove, and search addons from esoui.com
+    </p>
+    <p>
+      - Cross-platform support for Linux, macOS, and Windows
+    </p>
+    <p>
+      - Specific support for ESO on the Steam Deck through flatpak
+    </p>
+    <p>
+      - Options to auto update Tamriel Trade Centre prices and HarvestMap data
+    </p>
+    <p>
+      - Import managed addons from Minion
+    </p>
+    <p>
+      - Identify and install missing dependencies
+    </p>
+  </description>
+
+  <url type="homepage">https://github.com/arviceblot/eso-addons</url>
+  <url type="bugtracker">https://github.com/arviceblot/eso-addons/issues</url>
+
+  <launchable type="desktop-id">com.arviceblot.eso-addon-manager.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/browse.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/settings.png</image>
+    </screenshot>
+  </screenshots>
+</component>
