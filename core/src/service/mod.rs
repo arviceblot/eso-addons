@@ -276,9 +276,6 @@ impl AddonService {
                 result.missing_deps = need_installs;
             }
 
-            // find addon details where we have the older version
-            result.missing_details = service.get_missing_addon_detail_ids().await?;
-
             info!("Saving config");
             service.config.file_details = service.api.file_details_url.to_owned();
             service.config.file_list = service.api.file_list_url.to_owned();
