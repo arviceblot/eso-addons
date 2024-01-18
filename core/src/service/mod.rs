@@ -59,7 +59,7 @@ impl AddonService {
     pub fn new() -> ImmediateValuePromise<AddonService> {
         ImmediateValuePromise::new(async move {
             // setup config
-            let config = Config::default();
+            let config = Config::load();
 
             // init api/download client
             // TODO: consider moving endpoint_url to config as default value

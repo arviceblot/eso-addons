@@ -35,8 +35,7 @@ impl serde::Serialize for AddonEntry {
     }
 }
 
-// #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     #[serde(default = "default_addon_dir")]
     pub addon_dir: PathBuf,
@@ -57,8 +56,8 @@ pub struct Config {
     #[serde(default)]
     pub update_hm_data: bool,
 }
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    pub fn load() -> Config {
         // check config dir exists
         let config_dir = Self::default_config_dir();
         if !config_dir.exists() {
@@ -66,30 +65,38 @@ impl Default for Config {
         }
         let config_filepath = Self::default_config_path();
         // create config file if not exists, with defaults
-        if !config_filepath.exists() {
-            OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(&config_filepath)
-                .unwrap();
-        }
+        let config: Config = match config_filepath.exists() {
+            true => {
+                let config_data = fs::read_to_string(&config_filepath)
+                    .context(error::ConfigLoadSnafu {
+                        path: &config_filepath,
+                    })
+                    .unwrap();
+                if config_data.is_empty() {
+                    // load defaults
+                    Config::default()
+                } else {
+                    serde_json::from_str(&config_data)
+                        .context(error::ConfigParseSnafu {
+                            path: &config_filepath,
+                        })
+                        .unwrap()
+                }
+            }
+            false => {
+                OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .open(&config_filepath)
+                    .unwrap();
+                Config::default()
+            }
+        };
 
-        let config_data = fs::read_to_string(&config_filepath)
-            .context(error::ConfigLoadSnafu {
-                path: &config_filepath,
-            })
-            .unwrap();
-        let config: Config = serde_json::from_str(&config_data)
-            .context(error::ConfigParseSnafu {
-                path: &config_filepath,
-            })
-            .unwrap();
         // write defaults for immediate use
         config.save().unwrap();
         config
     }
-}
-impl Config {
     pub fn save(&self) -> Result<()> {
         let path = Self::default_config_path();
         let config_str = serde_json::to_string_pretty(self)
