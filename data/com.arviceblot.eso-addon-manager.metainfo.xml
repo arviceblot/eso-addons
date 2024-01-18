@@ -3,7 +3,8 @@
   <id>com.arviceblot.eso-addon-manager</id>
 
   <name>ESO AddOn Manager</name>
-  <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.</summary>
+  <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online.</summary>
+  <developer_name>arviceblot</developer_name>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
@@ -12,7 +13,7 @@
 
   <description>
     <p>
-      Features
+      Update and install addons for ESO. Primarily built on Linux for Linux.
     </p>
     <ul>
       <li>Install, remove, and search addons from esoui.com</li>
@@ -43,6 +44,9 @@
   <releases>
     <release version="0.4.7" date="2024-01-17">
       <description>
+        <p>
+          This release brings the following changes and updates:
+        </p>
         <ul>
           <li>Update layout so tab bar is always visible.</li>
           <li>Add raw text view option for addon descriptions and changelogs.</li>
