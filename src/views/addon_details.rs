@@ -30,10 +30,12 @@ impl Details {
             if let Some(details) = self.details.value.as_ref().unwrap() {
                 // we have details, no setup parse for details and changelog if present
                 if let Some(description) = details.description.as_ref() {
+                    info!("Parsing BBCode for addon description: {}", details.id);
                     self.parsed_description
                         .set(service.parse_bbcode(description.to_string()));
                 }
                 if let Some(changelog) = details.change_log.as_ref() {
+                    info!("Parsing BBCode for addon changelog: {}", details.id);
                     self.parsed_changelog
                         .set(service.parse_bbcode(changelog.to_string()));
                 }
@@ -72,7 +74,6 @@ impl Details {
     pub fn set_addon(&mut self, addon_id: i32, service: &mut AddonService) {
         self.addon_id = addon_id;
         // get addon details from service
-        info!("Getting addon details for id: {}", addon_id);
         self.details.set(service.get_addon_details(addon_id));
         // if we get a new addon, reset view to description
         self.show_changelog = false;

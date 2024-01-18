@@ -5,6 +5,8 @@ use snafu::ResultExt;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 
+use tracing::log::info;
+
 pub const EAM_DATA_DIR: &str = "eso-addons";
 pub const EAM_CONF: &str = "config.json";
 pub const EAM_DB: &str = "addons.db";
@@ -61,6 +63,7 @@ impl Config {
         // check config dir exists
         let config_dir = Self::default_config_dir();
         if !config_dir.exists() {
+            info!("Creating config directory: {}", config_dir.display());
             fs::create_dir_all(&config_dir).unwrap();
         }
         let config_filepath = Self::default_config_path();
@@ -74,8 +77,13 @@ impl Config {
                     .unwrap();
                 if config_data.is_empty() {
                     // load defaults
+                    info!(
+                        "Empty config data, loading defaults to: {}",
+                        config_filepath.display()
+                    );
                     Config::default()
                 } else {
+                    info!("Loading config data at: {}", config_filepath.display());
                     serde_json::from_str(&config_data)
                         .context(error::ConfigParseSnafu {
                             path: &config_filepath,
@@ -84,6 +92,7 @@ impl Config {
                 }
             }
             false => {
+                info!("No config file, creating at: {}", config_filepath.display());
                 OpenOptions::new()
                     .create(true)
                     .write(true)

@@ -38,17 +38,6 @@ pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 
-#[derive(Debug)]
-enum AddonPromiseType {
-    UpdateResult,
-}
-type AddonPromise = HashMap<i32, ImmediateValuePromise<AddonPromiseType>>;
-#[derive(Debug)]
-enum PromiseType {
-    Install,
-    UpdateDetails,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
     pub api: ApiClient,
@@ -346,7 +335,7 @@ impl AddonService {
             return Ok(());
         }
 
-        info!("Updating addon details for addon: {}", id);
+        info!("Downloading addon details for addon: {}", id);
 
         let file_details = self.api.get_file_details(id).await?;
         let record = AddonDetail::ActiveModel {
@@ -581,8 +570,13 @@ impl AddonService {
         &self,
         addon_id: i32,
     ) -> ImmediateValuePromise<Option<AddonShowDetails>> {
-        let db = self.db.clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            // check if we need to grab it, grab if needed
+            service.p_update_addon_details(addon_id).await.unwrap();
+
+            // get the details we need
+            info!("Loading addon details for id: {}", addon_id);
             let result = DbAddon::Entity::find_by_id(addon_id)
                 .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
@@ -593,7 +587,7 @@ impl AddonService {
                 .inner_join(AddonDetail::Entity)
                 .left_join(InstalledAddon::Entity)
                 .into_model::<AddonShowDetails>()
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();

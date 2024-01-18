@@ -16,8 +16,6 @@ use super::{
     View,
 };
 
-const DETAIL_BUFF_SIZE: usize = 50;
-
 #[derive(Default)]
 pub struct Installed {
     // addons_promise: Option<ImmediateValuePromise<Vec<AddonShowDetails>>>,
@@ -25,8 +23,6 @@ pub struct Installed {
     update_one: HashMap<i32, PromisedValue<()>>,
     pub update: PromisedValue<UpdateResult>,
     remove: PromisedValue<()>,
-    update_details_q: VecDeque<i32>,
-    update_details: HashMap<i32, PromisedValue<()>>,
     ttc_pricetable: PromisedValue<()>,
     hm_data: PromisedValue<()>,
     displayed_addons: Vec<AddonShowDetails>,
@@ -44,8 +40,6 @@ impl Installed {
             installed_addons: PromisedValue::default(),
             update: PromisedValue::default(),
             remove: PromisedValue::default(),
-            update_details_q: VecDeque::new(),
-            update_details: HashMap::with_capacity(DETAIL_BUFF_SIZE),
             ttc_pricetable: PromisedValue::default(),
             update_one: HashMap::new(),
             displayed_addons: vec![],
@@ -69,10 +63,6 @@ impl Installed {
         self.update.poll();
         if self.update.is_ready() && !self.installed_addons.is_polling() {
             self.update.handle();
-            if self.update.value.is_some() {
-                self.update_details_q =
-                    VecDeque::from(self.update.value.as_ref().unwrap().missing_details.to_vec());
-            }
             self.log.push("Updated addon list.".to_string());
             self.get_installed_addons(service);
         }
@@ -86,8 +76,6 @@ impl Installed {
             self.log.push("Updated HarvestMap data.".to_string());
             self.hm_data.handle();
         }
-
-        self.update_addon_details(service);
 
         self.installed_addons.poll();
         if self.installed_addons.is_ready() {
@@ -117,37 +105,6 @@ impl Installed {
         }
         if fetch_addons {
             self.get_installed_addons(service);
-        }
-    }
-    fn update_addon_details(&mut self, service: &mut AddonService) {
-        if self.update_details.is_empty() && self.update_details_q.is_empty() {
-            return;
-        }
-
-        // update promises
-        let mut updated_details = vec![];
-        for (addon_id, promise) in self.update_details.iter_mut() {
-            promise.poll();
-            if promise.is_ready() {
-                updated_details.push(addon_id.to_owned());
-                promise.handle();
-                self.log.push(format!("Updated addon details: {addon_id}"));
-            }
-        }
-        for addon_id in updated_details.iter() {
-            self.update_details.remove(addon_id);
-        }
-
-        // queue up more details
-        while self.update_details.len() < DETAIL_BUFF_SIZE {
-            if self.update_details_q.is_empty() {
-                break;
-            }
-            // populate detail buffer
-            let addon_id = self.update_details_q.pop_front().unwrap();
-            let mut promise = PromisedValue::<()>::default();
-            promise.set(service.update_addon_details(addon_id));
-            self.update_details.insert(addon_id, promise);
         }
     }
     fn is_updating_addon(&self, addon_id: i32) -> bool {
