@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.arviceblot.eso_addon_manager</id>
+  <id>com.arviceblot.eso-addon-manager</id>
 
   <name>ESO AddOn Manager</name>
   <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.</summary>
@@ -8,28 +8,20 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
 
+  <content_rating type="oars-1.1" />
+
   <description>
     <p>
       Features
     </p>
-    <p>
-      - Install, remove, and search addons from esoui.com
-    </p>
-    <p>
-      - Cross-platform support for Linux, macOS, and Windows
-    </p>
-    <p>
-      - Specific support for ESO on the Steam Deck through flatpak
-    </p>
-    <p>
-      - Options to auto update Tamriel Trade Centre prices and HarvestMap data
-    </p>
-    <p>
-      - Import managed addons from Minion
-    </p>
-    <p>
-      - Identify and install missing dependencies
-    </p>
+    <ul>
+      <li>Install, remove, and search addons from esoui.com</li>
+      <li>Cross-platform support for Linux, macOS, and Windows</li>
+      <li>Specific support for ESO on the Steam Deck through flatpak</li>
+      <li>Options to auto update Tamriel Trade Centre prices and HarvestMap data</li>
+      <li>Import managed addons from Minion</li>
+      <li>Identify and install missing dependencies</li>
+    </ul>
   </description>
 
   <url type="homepage">https://github.com/arviceblot/eso-addons</url>
@@ -47,4 +39,17 @@
       <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/settings.png</image>
     </screenshot>
   </screenshots>
+
+  <releases>
+    <release version="0.4.7" date="2024-01-17">
+      <description>
+        <ul>
+          <li>Update layout so tab bar is always visible.</li>
+          <li>Add raw text view option for addon descriptions and changelogs.</li>
+          <li>Change auto-update functionality to update all button.</li>
+          <li>Add install and update addon funcitonality to addon detail view.</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
 </component>
