@@ -9,7 +9,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 - GUI ~~and CLI options~~ (CLI disabled due to breaking changes to support GUI)
 - Install, remove, and search addons from [esoui.com](https://www.esoui.com)
 - Cross-platform support for Linux, macOS, and Windows
-- Specific support for ESO on the Steam Deck through AppImage
+- Specific support for ESO on the Steam Deck through Flathub
 - Options to auto update Tamriel Trade Centre prices and HarvestMap data
 - No Java!
 - Import managed addons from Minion
@@ -17,52 +17,54 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 
 ## Installing
 
-TODO: Publish to Flathub and crates.io
+### Linux
 
-### AppImage
+The recommended install is to use the version from flathub. This has the added benefit of centralized updates.
 
-TODO:
+<a href="https://flathub.org/apps/details/com.arviceblot.eso-addon-manager"><img src="https://flathub.org/assets/badges/flathub-badge-en.png" alt="Flathub" height="50"/></a>
 
-## Building from source
+Or using the flatpak CLI:
+
+```shell
+flatpak install com.arviceblot.eso-addon-manager
+```
+
+#### AppImage
+
+Download the `.AppImage` from the [releases](https://github.com/arviceblot/eso-addons/releases) page.
+
+
+#### Build latest from source
 
 ```shell
 cargo install --git https://github.com/arviceblot/eso-addons.git
 ```
 
+### macOS and Windows
+
+Downlaod the appropriate file for your OS from the [releases](https://github.com/arviceblot/eso-addons/releases) page.
+
 ## Running
+
+### Flatpak
+
+Either run using the desktop file flatpak installs or from the CLI:
+
+```shell
+flatpak run com.arviceblot.eso-addon-manager
+```
 
 ### AppImage with AppImageLauncher
 
 If the app was installed through AppImageLauncher, it should have automatically created a desktop entry. This can be added to steam as a non-steam game in desktop mode where it can then be launched in game mode. The app can be closed in game mode using the steam app menu.
 
-### CLI
+### cargo
 
 ```shell
-❯ eso-addons --help
-eso-addons 0.1.0
-
-CLI tool for managing addons for The Elder Scrolls Online
-
-USAGE:
-    eso-addons [OPTIONS] <SUBCOMMAND>
-
-OPTIONS:
-    -c, --config <CONFIG>    Path to TOML config file
-    -h, --help               Print help information
-    -V, --version            Print version information
-
-SUBCOMMANDS:
-    add       Add a new addon
-    help      Print this message or the help of the given subcommand(s)
-    remove    Uninstall addon
-    search    Search addons
-    show      Show addon details
-    update    Update addons
+cargo run eso-addon-manager
 ```
 
 ## Updating
-
-TODO: cargo
 
 ### AppImage
 
