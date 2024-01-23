@@ -32,6 +32,13 @@ jobs:
           override: true
           profile: minimal
 
+      - name: Install packages
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install libssl-dev
+
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
