@@ -30,7 +30,7 @@ eframe = "0.25.0"
 tokio = { version = "1.29.1", features = ["full"] }
 eso-addons-core = { path = "./core" }
 strum = "0.24.1"
-strum_macros = "0.24.3"
+strum_macros = "0.26.1"
 egui_file = "0.14.1"
 itertools = "0.10.5"
 lazy_async_promise = "0.5.0"
