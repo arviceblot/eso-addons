@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 use tracing::log::info;
 
-use eframe::{
-    egui::{self, Layout, RichText, ScrollArea},
-    epaint::Color32,
-};
+use eframe::egui::{self, Layout, RichText, ScrollArea};
 use eso_addons_core::service::{
     result::{AddonShowDetails, UpdateResult},
     AddonService,
@@ -12,9 +9,7 @@ use eso_addons_core::service::{
 use strum::IntoEnumIterator;
 
 use super::{
-    ui_helpers::{
-        ui_show_addon_item, AddonResponse, AddonResponseType, AddonTable, PromisedValue, Sort,
-    },
+    ui_helpers::{AddonResponse, AddonTable, PromisedValue, Sort},
     View,
 };
 

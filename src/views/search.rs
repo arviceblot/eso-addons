@@ -201,10 +201,7 @@ impl View for Search {
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
-        let mut response = AddonResponse {
-            addon_id: 0,
-            response_type: AddonResponseType::None,
-        };
+        let mut response = AddonResponse::default();
         self.handle_init(service);
         self.poll(service);
 

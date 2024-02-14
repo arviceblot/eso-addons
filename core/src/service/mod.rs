@@ -7,7 +7,7 @@ use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
 use crate::config::{self, Config};
-use crate::error::{self, AddonDownloadHashSnafu, DbGetSnafu, Result};
+use crate::error::{self, AddonDownloadHashSnafu, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
@@ -931,6 +931,31 @@ impl AddonService {
             }
             info!("Done HarvestMap data!");
             Ok(())
+        })
+    }
+    pub fn get_addons_by_author(
+        &self,
+        author: String,
+    ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Getting addons by author: {}", author);
+            let results = DbAddon::Entity::find()
+                .column_as(DbAddon::Column::Version, "version")
+                .column_as(InstalledAddon::Column::Version, "installed_version")
+                .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+                .column_as(Category::Column::Title, "category")
+                .column_as(Expr::value("NULL"), "description")
+                .column_as(Expr::value("NULL"), "change_log")
+                .inner_join(Category::Entity)
+                .left_join(InstalledAddon::Entity)
+                .filter(DbAddon::Column::AuthorName.eq(author))
+                .into_model::<AddonShowDetails>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            info!("Done getting addons!");
+            Ok(results)
         })
     }
 }

@@ -45,6 +45,10 @@ impl Default for Sort {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewOpt {
+    /// Not really a reachable view, but a base
+    Root,
+    // Onboard,
+    // MissingDep,
     Installed,
     Search,
     // Author,
@@ -128,12 +132,14 @@ pub enum AddonResponseType {
 pub struct AddonResponse {
     pub addon_id: i32,
     pub response_type: AddonResponseType,
+    pub source: Option<ViewOpt>,
 }
 impl Default for AddonResponse {
     fn default() -> Self {
         Self {
             addon_id: 0,
             response_type: AddonResponseType::None,
+            source: None,
         }
     }
 }
@@ -159,11 +165,7 @@ impl<'a> AddonTable<'a> {
         } = *self;
         // let has_updateable = any(addons.iter(), |x| x.is_upgradable());
         let num_rows = addons.len();
-        let mut response = AddonResponse {
-            addon_id: 0,
-            response_type: AddonResponseType::None,
-        };
-        // let mut response = None;
+        let mut response = AddonResponse::default();
         TableBuilder::new(ui)
             // .striped(true)
             // .resizable(self.resizable)

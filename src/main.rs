@@ -1,5 +1,5 @@
 use dotenv::dotenv;
-use eframe::egui::{self, Label, Response, RichText, Style};
+use eframe::egui::{self, RichText};
 use eso_addons_core::service::AddonService;
 use std::time::Duration;
 
@@ -36,12 +36,15 @@ async fn main() -> Result<(), eframe::Error> {
 }
 
 struct EamApp {
+    /// The currect active view
     view: ViewOpt,
+    /// Previous view, stored really only to compare against view change
     prev_view: ViewOpt,
+    /// View history, probably assumes first item is ViewOpt::Root
+    view_stack: Vec<ViewOpt>,
     installed_view: Installed,
     search: Search,
     settings: Settings,
-    // browse: Browse,
     service: PromisedValue<AddonService>,
     selected_addon: Option<i32>,
     details: Details,
@@ -55,11 +58,11 @@ impl Default for EamApp {
 
         EamApp {
             view: ViewOpt::Installed,
-            prev_view: ViewOpt::Installed,
+            prev_view: ViewOpt::Root,
+            view_stack: vec![ViewOpt::Root],
             installed_view: Installed::new(),
             search: Search::new(),
             settings: Settings::default(),
-            // browse: Browse::default(),
             service,
             selected_addon: None,
             details: Details::default(),
@@ -95,6 +98,7 @@ impl EamApp {
             self.selected_addon.unwrap(),
             self.service.value.as_mut().unwrap(),
         );
+        self.view_stack.push(self.view);
         self.prev_view = self.view;
         self.view = ViewOpt::Details;
     }
@@ -187,6 +191,10 @@ impl eframe::App for EamApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     AddonResponse::default()
                 }
+                ViewOpt::Root => {
+                    // should not be reachable with defaults
+                    todo!();
+                }
             };
 
             // check missing dep from update result
@@ -219,7 +227,7 @@ impl eframe::App for EamApp {
                     if self.view == ViewOpt::Details {
                         self.selected_addon = None;
                     }
-                    std::mem::swap(&mut self.prev_view, &mut self.view);
+                    self.view = self.view_stack.pop().unwrap();
                 }
                 AddonResponseType::None => {}
                 AddonResponseType::Update => todo!(),
