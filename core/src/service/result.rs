@@ -71,6 +71,7 @@ pub struct AddonShowDetails {
     pub installed: bool,
     pub installed_version: Option<String>,
     pub download_total: Option<String>,
+    pub download_monthly: Option<String>,
     pub favorite_total: Option<String>,
     pub file_info_url: String,
     pub download: Option<String>,
@@ -112,4 +113,11 @@ pub struct ParentCategory {
     pub id: i32,
     pub title: String,
     pub child_categories: Vec<Category>,
+}
+
+#[derive(FromQueryResult, Default, Clone)]
+pub struct CategoryResult {
+    pub id: i32,
+    pub title: String,
+    pub file_count: Option<i32>,
 }

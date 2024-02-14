@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
 use super::{
-    ui_helpers::{ui_show_addon_item, ui_show_bbtree, PromisedValue},
+    ui_helpers::{
+        truncate, ui_show_addon_item, ui_show_bbtree, ui_show_star, AddonResponse,
+        AddonResponseType, PromisedValue,
+    },
     View,
 };
 use bbcode_tagger::BBTree;
-use eframe::egui::{self, ScrollArea};
+use eframe::egui::{self, Layout, RichText, ScrollArea};
+use egui_extras::{Column, TableBuilder};
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
 use tracing::log::info;
 
@@ -106,20 +110,21 @@ impl Details {
 impl View for Details {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
-    ) -> Option<i32> {
+    ) -> AddonResponse {
+        let mut response = AddonResponse::default();
         self.poll(service);
 
         if self.details.is_polling() {
             ui.spinner();
-            return None;
+            return response;
         }
 
         if self.details.value.as_ref().unwrap().is_none() {
             ui.label("No addon!");
-            return None;
+            return response;
         }
 
         let addon = self
@@ -130,23 +135,116 @@ impl View for Details {
             .as_ref()
             .unwrap()
             .to_owned();
+        // ui.horizontal(|ui| {
+        //     ui_show_addon_item(ui, &addon);
+        // });
         ui.horizontal(|ui| {
-            ui_show_addon_item(ui, &addon);
+            //close button
+            if ui.button(RichText::new("🗙 Close").heading()).clicked() {
+                response.response_type = AddonResponseType::Close;
+            }
+
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if addon.is_upgradable() {
+                    if self.is_updating_addon(addon.id) {
+                        ui.add_enabled(false, egui::Button::new("Updating..."));
+                    } else if ui.button(RichText::new("Update").heading()).clicked() {
+                        self.update_addon(addon.id, service);
+                    }
+                }
+                if !addon.installed {
+                    if self.is_installing_addon(addon.id) {
+                        ui.add_enabled(false, egui::Button::new("Installing..."));
+                    } else if ui.button(RichText::new("Install").heading()).clicked() {
+                        self.install_addon(addon.id, service);
+                    }
+                }
+            });
         });
-        if addon.is_upgradable() {
-            if self.is_updating_addon(addon.id) {
-                ui.add_enabled(false, egui::Button::new("Updating..."));
-            } else if ui.button("Update").clicked() {
-                self.update_addon(addon.id, service);
+        ui.add_space(5.0);
+
+        ui.horizontal(|ui| {
+            // ui.horizontal(|ui| {
+            ui.label(RichText::new(addon.name.as_str()).heading().strong());
+            if addon
+                .download_total
+                .as_ref()
+                .unwrap()
+                .parse::<i32>()
+                .unwrap()
+                > 5000
+            {
+                ui_show_star(ui);
             }
-        }
-        if !addon.installed {
-            if self.is_installing_addon(addon.id) {
-                ui.add_enabled(false, egui::Button::new("Installing..."));
-            } else if ui.button("Install").clicked() {
-                self.install_addon(addon.id, service);
-            }
-        }
+            // });
+        });
+        ui.add_space(5.0);
+
+        ui.horizontal(|ui| {
+            ui.selectable_label(
+                false,
+                RichText::new(format!("by: {}", addon.author_name.as_str())),
+            );
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(format!("Version: {}", addon.version));
+            });
+        });
+        // table of values
+        // URL
+        // ui.label(RichText::new(addon.category.as_str()));
+        // compatibility
+        // updated
+        // created
+        // monthly downloads
+        // total downloads
+        // favorites
+        // MD5
+        ui.horizontal(|ui| {
+            egui::Grid::new("detail_grid")
+                .num_columns(2)
+                .spacing([40.0, 4.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("URL");
+                    ui.hyperlink_to(truncate(&addon.file_info_url), addon.file_info_url);
+                    ui.end_row();
+
+                    ui.label("Category:");
+                    ui.label(addon.category);
+                    ui.end_row();
+
+                    // TODO: pending API client and DB update
+                    // ui.label("Compatibility:");
+                    // ui.label("");
+                    // ui.end_row();
+
+                    ui.label("Updated:");
+                    ui.label(addon.date);
+                    ui.end_row();
+
+                    // I don't think we have this in the public API?
+                    // ui.label("Created:");
+                    // ui.label("");
+                    // ui.end_row();
+
+                    ui.label("Monthly Downloads:");
+                    ui.label(addon.download_monthly.unwrap_or("".to_string()));
+                    ui.end_row();
+
+                    ui.label("Total Downloads:");
+                    ui.label(addon.download_total.unwrap_or("".to_string()));
+                    ui.end_row();
+
+                    ui.label("Favorites:");
+                    ui.label(addon.favorite_total.unwrap_or("".to_string()));
+                    ui.end_row();
+
+                    ui.label("MD5:");
+                    // TODO: add click to copy
+                    ui.code(addon.md5.unwrap_or("".to_string()));
+                    ui.end_row();
+                });
+        });
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -156,7 +254,6 @@ impl View for Details {
         });
         ui.separator();
 
-        // ui.vertical_centered_justified(|ui| {
         ScrollArea::vertical().show(ui, |ui| {
             if !self.show_changelog {
                 // show details
@@ -171,7 +268,6 @@ impl View for Details {
                 ui.label(addon.change_log.as_ref().unwrap_or(&"".to_string()));
             }
         });
-        // });
-        None
+        response
     }
 }

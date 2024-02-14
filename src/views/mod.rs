@@ -1,8 +1,10 @@
 use eframe::egui;
 use eso_addons_core::service::AddonService;
 
+use self::ui_helpers::AddonResponse;
+
 pub mod addon_details;
-pub mod browse;
+// pub mod browse;
 pub mod installed;
 pub mod missing_deps;
 pub mod onboard;
@@ -16,5 +18,5 @@ pub trait View {
         ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
-    ) -> Option<i32>;
+    ) -> AddonResponse;
 }

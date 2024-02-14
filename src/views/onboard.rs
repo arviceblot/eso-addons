@@ -3,6 +3,8 @@ use egui_file::FileDialog;
 
 use crate::views::View;
 
+use super::ui_helpers::AddonResponse;
+
 #[derive(Default)]
 pub struct Onboard {
     open_addon_dir_dialog: Option<FileDialog>,
@@ -20,7 +22,8 @@ impl View for Onboard {
         ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
         service: &mut eso_addons_core::service::AddonService,
-    ) -> Option<i32> {
+    ) -> AddonResponse {
+        let response = AddonResponse::default();
         // welcome
         ui.label("Welcome to the Unofficial ESO AddOn Manager!");
         ui.label("Let's start by finding the right foler to save your AddOns:");
@@ -49,6 +52,6 @@ impl View for Onboard {
             service.config.onboard = false;
             service.save_config();
         }
-        None
+        response
     }
 }

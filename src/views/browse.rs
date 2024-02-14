@@ -38,7 +38,7 @@ impl Browse {
         self.displayed_addons
             .set(service.get_addons_by_category(self.selected_category));
     }
-    fn install_addon(&self, addon_id: i32, service: &mut AddonService) {
+    fn install_addon(&self, _addon_id: i32, _service: &mut AddonService) {
         // TODO: add back
         // rt.block_on(service.install(addon_id, false)).unwrap();
     }
@@ -46,7 +46,7 @@ impl Browse {
 impl View for Browse {
     fn ui(
         &mut self,
-        ctx: &eframe::egui::Context,
+        _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
         service: &mut AddonService,
     ) -> Option<i32> {
@@ -67,7 +67,7 @@ impl View for Browse {
                     ui.heading("Categories");
                 });
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::CollapsingHeader::new("All")
+                    egui::CollapsingHeader::new("Any")
                         .default_open(true)
                         .show(ui, |ui| {
                             for (i, parent) in self
@@ -107,7 +107,6 @@ impl View for Browse {
             self.previous_category = self.selected_category;
         }
 
-        // TODO: add sorting and filtering similar to Installed view.
         // TODO: add table pagination instead of hard limiting search results.
         let mut addon_id = None;
         egui::CentralPanel::default().show_inside(ui, |ui| {

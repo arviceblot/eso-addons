@@ -1,8 +1,8 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use tracing::log::info;
 
 use eframe::{
-    egui::{self, RichText, ScrollArea},
+    egui::{self, Layout, RichText, ScrollArea},
     epaint::Color32,
 };
 use eso_addons_core::service::{
@@ -12,7 +12,9 @@ use eso_addons_core::service::{
 use strum::IntoEnumIterator;
 
 use super::{
-    ui_helpers::{ui_show_addon_item, PromisedValue, Sort},
+    ui_helpers::{
+        ui_show_addon_item, AddonResponse, AddonResponseType, AddonTable, PromisedValue, Sort,
+    },
     View,
 };
 
@@ -232,7 +234,12 @@ impl Installed {
         let mut promise = PromisedValue::<()>::default();
         promise.set(service.remove(addon_id));
         self.remove = promise;
-        // rt.block_on(service.remove(addon_id)).unwrap();
+    }
+
+    fn update_addon(&mut self, addon_id: i32, service: &mut AddonService) {
+        let mut promise = PromisedValue::<()>::default();
+        promise.set(service.install(addon_id, true));
+        self.update_one.insert(addon_id, promise);
     }
 
     fn get_updateable_addon_count(&self) -> usize {
@@ -251,7 +258,8 @@ impl View for Installed {
         ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
-    ) -> Option<i32> {
+    ) -> AddonResponse {
+        let mut response = AddonResponse::default();
         if self.show_init() {
             self.check_update(service);
         }
@@ -262,7 +270,7 @@ impl View for Installed {
         // if we are loading addons, show spinner and that's it
         if self.installed_addons.is_polling() || self.update.is_polling() {
             ui.spinner();
-            return None;
+            return response;
         }
 
         egui::TopBottomPanel::bottom("installed_bottom").show(ctx, |ui| {
@@ -286,7 +294,6 @@ impl View for Installed {
                 });
         });
 
-        let mut return_id = None;
         if !self.installed_addons.is_polling()
             && self.installed_addons.value.as_ref().unwrap().is_empty()
         {
@@ -296,22 +303,39 @@ impl View for Installed {
         } else {
             self.handle_sort();
             egui::TopBottomPanel::top("installed_top").show(ctx, |ui| {
+                ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     let updateable_count = self.get_updateable_addon_count();
-                    if !self.update_one.is_empty() {
-                        ui.add_enabled(false, egui::Button::new("Updating..."));
-                    } else if updateable_count == 0 && ui.button("Check For Updates").clicked() {
-                        self.check_update(service);
-                    } else if updateable_count > 0
-                        && ui
-                            .button(format!(
-                                "Update {updateable_count} Addon{}",
-                                if updateable_count == 1 { "" } else { "s" }
-                            ))
+                    ui.label(
+                        RichText::new(format!(
+                            "Installed - {} addons ({})",
+                            self.installed_addons.value.as_ref().unwrap().len(),
+                            updateable_count
+                        ))
+                        .heading()
+                        .strong(),
+                    );
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        if !self.update_one.is_empty() {
+                            ui.add_enabled(false, egui::Button::new("Updating..."));
+                        } else if updateable_count > 0
+                            && ui
+                                .button(RichText::new("⮉ Update All").heading().strong())
+                                .clicked()
+                        {
+                            self.update_addons(service);
+                        }
+                        if ui
+                            .button(RichText::new("🔄 Check for Updates").heading().strong())
                             .clicked()
-                    {
-                        self.update_addons(service);
-                    }
+                        {
+                            self.check_update(service);
+                        }
+                        ui.checkbox(&mut self.editing, "Edit");
+                    });
+                });
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
                     egui::ComboBox::from_id_source("sort")
                         .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
                         .show_ui(ui, |ui| {
@@ -321,89 +345,27 @@ impl View for Installed {
                                 ui.selectable_value(&mut self.sort, sort, sort.to_string());
                             }
                         });
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.filter)
-                            .desired_width(120.0)
-                            .hint_text("Filter..."),
-                    );
+                    ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Search ..."));
                     if ui.button("🗙").clicked() {
                         self.filter.clear();
                     }
                 });
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "Installed: {}",
-                        self.installed_addons.value.as_ref().unwrap().len()
-                    ));
-                    ui.checkbox(&mut self.editing, "Edit");
-                });
+                ui.add_space(5.0);
             });
-            // ui.separator();
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.vertical_centered_justified(|ui| {
-                    ScrollArea::vertical()
-                        .max_height(300.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                let mut remove_id: Option<i32> = Default::default();
-                                egui::Grid::new("addon_grid")
-                                    .striped(true)
-                                    .spacing([5.0, 20.0])
-                                    .show(ui, |ui| {
-                                        for addon in self.displayed_addons.iter().filter(|x| {
-                                            self.filter.is_empty()
-                                                || x.name
-                                                    .to_lowercase()
-                                                    .contains(&self.filter.to_lowercase())
-                                        }) {
-                                            // col0 x button if editing
-                                            if self.editing {
-                                                if self.remove.is_polling() {
-                                                    ui.spinner();
-                                                } else {
-                                                    ui.horizontal_centered(|ui| {
-                                                        if ui
-                                                            .button(
-                                                                RichText::new("🗙")
-                                                                    .color(Color32::RED),
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            remove_id = Some(addon.id);
-                                                        }
-                                                    });
-                                                }
-                                            }
-                                            if ui_show_addon_item(ui, addon).unwrap().clicked() {
-                                                return_id = Some(addon.id);
-                                            }
-
-                                            if addon.is_upgradable() {
-                                                if self.is_updating_addon(addon.id) {
-                                                    ui.add_enabled(
-                                                        false,
-                                                        egui::Button::new("Updating..."),
-                                                    );
-                                                } else if ui.button("Update").clicked() {
-                                                    let mut promise =
-                                                        PromisedValue::<()>::default();
-                                                    promise.set(service.install(addon.id, true));
-                                                    self.update_one.insert(addon.id, promise);
-                                                }
-                                            }
-                                            ui.end_row();
-                                        }
-                                    });
-                                if let Some(id) = remove_id {
-                                    self.remove_addon(id, service);
-                                }
-                            });
-                        });
-                });
+                let addons: Vec<&AddonShowDetails> = self
+                    .displayed_addons
+                    .iter()
+                    .filter(|x| {
+                        x.name
+                            .to_lowercase()
+                            .contains(self.filter.to_lowercase().as_str())
+                    })
+                    .collect();
+                response = AddonTable::new(&addons).installable(true).ui(ui);
             });
         }
 
-        return_id
+        response
     }
 }

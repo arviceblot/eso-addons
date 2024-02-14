@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -8,7 +7,7 @@ use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
 use crate::config::{self, Config};
-use crate::error::{self, AddonDownloadHashSnafu, Result};
+use crate::error::{self, AddonDownloadHashSnafu, DbGetSnafu, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
@@ -20,7 +19,7 @@ use entity::manual_dependency as ManualDependency;
 use migration::{Condition, Migrator, MigratorTrait};
 
 use bbcode_tagger::{BBCode, BBTree};
-use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use lazy_async_promise::ImmediateValuePromise;
 use md5::{Digest, Md5};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
@@ -182,7 +181,7 @@ impl AddonService {
             .all(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        for update in updates.iter() {
+        for _update in updates.iter() {
             // self.install(update.id, true).await.unwrap(); // TODO: add back?
         }
         let need_installs = self.get_missing_dependency_options().await;
@@ -288,6 +287,7 @@ impl AddonService {
         })
     }
 
+    #[allow(dead_code)]
     async fn get_missing_addon_detail_ids(&self) -> Result<Vec<i32>> {
         let mut results = vec![];
         info!("Getting addons with missing or outdated details");
@@ -660,9 +660,9 @@ impl AddonService {
             let outpath = match file.enclosed_name() {
                 Some(path) => {
                     let mut p = self.get_addon_dir().clone();
-                    if path_addr.is_some() {
+                    if let Some(x) = path_addr {
                         // append additional path if defined
-                        p.push(path_addr.unwrap());
+                        p.push(x);
                     }
                     p.push(path);
                     p
@@ -722,18 +722,16 @@ impl AddonService {
         self.config.save().unwrap();
     }
 
-    pub fn import_minion_file(&mut self, file: &PathBuf) -> ImmediateValuePromise<()> {
+    pub fn import_minion_file(&mut self, file: &Path) -> ImmediateValuePromise<()> {
         // Takes a path to a minion backup file, it should be named something like `BU-addons.txt`
         // It should contain a single line of comma-separated addon IDs
         let service = self.clone();
-        let filepath = file.clone();
+        let filepath = file.to_path_buf();
 
         ImmediateValuePromise::new(async move {
             // Update should already be called on app init, so main addon table should be populated
             // If called on a new database, the main addon table will be empty. As a workaround, call `update()`.
             // self.update(false).await.unwrap();
-
-            let mut install_promises = HashMap::new();
 
             let line = fs::read_to_string(filepath).unwrap();
             let ids: Vec<i32> = line
@@ -741,26 +739,28 @@ impl AddonService {
                 .filter(|&x| !x.is_empty())
                 .map(|x| x.parse::<i32>().unwrap())
                 .collect();
+            // workaround for weird behavior with promise in promise, slowly install addons one at a time
+            // TODO: consider using different promise to report install progress back to OG thread
             for addon_id in ids.iter() {
-                install_promises.insert(*addon_id, service.install(*addon_id, false));
-            }
-
-            while !install_promises.is_empty() {
-                let mut remove_ids: Vec<i32> = vec![];
-                for (addon_id, promise) in install_promises.iter_mut() {
-                    let state = promise.poll_state();
-                    if let ImmediateValueState::Success(_) = state {
-                        remove_ids.push(addon_id.to_owned());
-                    }
-                }
-                for addon_id in remove_ids.iter() {
-                    install_promises.remove(addon_id);
-                }
+                service.p_install(*addon_id, false).await.unwrap();
             }
             Ok(())
         })
     }
 
+    pub fn get_categories(&self) -> ImmediateValuePromise<Vec<CategoryResult>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let categories = Category::Entity::find()
+                .order_by_asc(Category::Column::Id)
+                .into_model::<CategoryResult>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)
+                .unwrap();
+            Ok(categories)
+        })
+    }
     pub fn get_category_parents(&self) -> ImmediateValuePromise<Vec<ParentCategory>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
@@ -806,7 +806,7 @@ impl AddonService {
     ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
-            let mut addons = DbAddon::Entity::find()
+            let addons = DbAddon::Entity::find()
                 .column_as(DbAddon::Column::Version, "version")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
                 .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
@@ -830,7 +830,7 @@ impl AddonService {
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();
-            addons.truncate(100);
+            // addons.truncate(100);
             Ok(addons)
         })
     }

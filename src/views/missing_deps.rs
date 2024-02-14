@@ -6,7 +6,7 @@ use eso_addons_core::service::AddonService;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::ui_helpers::PromisedValue;
+use super::ui_helpers::{AddonResponse, PromisedValue};
 use super::View;
 
 #[derive(Default)]
@@ -33,7 +33,7 @@ impl MissingDeps {
         }
         init
     }
-    fn poll(&mut self, service: &mut AddonService) {
+    fn poll(&mut self, _service: &mut AddonService) {
         self.installed_addons.poll();
         if self.installed_addons.is_ready() {
             self.installed_addons.handle();
@@ -97,10 +97,11 @@ impl MissingDeps {
 impl View for MissingDeps {
     fn ui(
         &mut self,
-        ctx: &eframe::egui::Context,
+        _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
         service: &mut eso_addons_core::service::AddonService,
-    ) -> Option<i32> {
+    ) -> AddonResponse {
+        let response = AddonResponse::default();
         // get installed addons on init
         if self.show_init() {
             self.get_installed_addons(service);
@@ -112,7 +113,7 @@ impl View for MissingDeps {
         // if installing addons, don't show everything else
         if self.install_new.is_polling() {
             ui.spinner();
-            return None;
+            return response;
         }
 
         // show missing deps when ready
@@ -186,6 +187,6 @@ impl View for MissingDeps {
                 }
             });
         });
-        None
+        response
     }
 }
