@@ -163,7 +163,7 @@ impl MigrationTrait for Migration {
         // 39: "Class & Role Specific"
         // 144: "Utilities"
         // 154: "Optional"
-        let base_cats = vec![
+        let base_cats = [
             (0, "All"),
             (23, "Stand-Alone Addons"),
             (39, "Class & Role Specific"),
@@ -197,7 +197,7 @@ impl MigrationTrait for Migration {
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum Category {
+pub enum Category {
     Table,
     Id,
     Title,

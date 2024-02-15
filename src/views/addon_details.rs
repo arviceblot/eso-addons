@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-
 use super::{
-    ui_helpers::{ui_show_addon_item, ui_show_bbtree, PromisedValue},
-    View,
+    ui_helpers::{ui_show_bbtree, ui_show_star, AddonResponse, AddonResponseType, PromisedValue},
+    ResetView, View,
 };
 use bbcode_tagger::BBTree;
-use eframe::egui::{self, ScrollArea};
+use eframe::egui::{self, Layout, RichText, ScrollArea};
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
-use tracing::log::info;
+use tracing::info;
 
 #[derive(Default)]
 pub struct Details {
@@ -17,8 +15,6 @@ pub struct Details {
     parsed_changelog: PromisedValue<BBTree>,
     show_changelog: bool,
     show_raw_text: bool,
-    install_one: HashMap<i32, PromisedValue<()>>,
-    update_one: HashMap<i32, PromisedValue<()>>,
 }
 
 impl Details {
@@ -42,32 +38,6 @@ impl Details {
             }
         }
 
-        let mut installed_addons = vec![];
-        for (addon_id, promise) in self.install_one.iter_mut() {
-            promise.poll();
-            if promise.is_ready() {
-                installed_addons.push(addon_id.to_owned());
-                promise.handle();
-            }
-        }
-        for addon_id in installed_addons.iter() {
-            self.install_one.remove(addon_id);
-            self.set_addon(*addon_id, service);
-        }
-
-        let mut updated_addons = vec![];
-        for (addon_id, promise) in self.update_one.iter_mut() {
-            promise.poll();
-            if promise.is_ready() {
-                updated_addons.push(addon_id.to_owned());
-                promise.handle();
-            }
-        }
-        for addon_id in updated_addons.iter() {
-            self.update_one.remove(addon_id);
-            self.set_addon(*addon_id, service);
-        }
-
         self.parsed_description.poll();
         self.parsed_changelog.poll();
     }
@@ -78,48 +48,25 @@ impl Details {
         // if we get a new addon, reset view to description
         self.show_changelog = false;
     }
-    fn install_addon(&mut self, addon_id: i32, service: &mut AddonService) {
-        let mut promise = PromisedValue::<()>::default();
-        promise.set(service.install(addon_id, true));
-        self.install_one.insert(addon_id, promise);
-    }
-    fn is_installing_addon(&self, addon_id: i32) -> bool {
-        let promise = self.install_one.get(&addon_id);
-        if promise.is_some() && !promise.unwrap().is_ready() {
-            return true;
-        }
-        false
-    }
-    fn update_addon(&mut self, addon_id: i32, service: &mut AddonService) {
-        let mut promise = PromisedValue::<()>::default();
-        promise.set(service.install(addon_id, true));
-        self.update_one.insert(addon_id, promise);
-    }
-    fn is_updating_addon(&self, addon_id: i32) -> bool {
-        let promise = self.update_one.get(&addon_id);
-        if promise.is_some() && !promise.unwrap().is_ready() {
-            return true;
-        }
-        false
-    }
 }
 impl View for Details {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
-    ) -> Option<i32> {
+    ) -> AddonResponse {
+        let mut response = AddonResponse::default();
         self.poll(service);
 
         if self.details.is_polling() {
             ui.spinner();
-            return None;
+            return response;
         }
 
         if self.details.value.as_ref().unwrap().is_none() {
             ui.label("No addon!");
-            return None;
+            return response;
         }
 
         let addon = self
@@ -130,33 +77,127 @@ impl View for Details {
             .as_ref()
             .unwrap()
             .to_owned();
+        // ui.horizontal(|ui| {
+        //     ui_show_addon_item(ui, &addon);
+        // });
         ui.horizontal(|ui| {
-            ui_show_addon_item(ui, &addon);
+            //close button
+            if ui.button(RichText::new("⮪ Close").heading()).clicked() {
+                response.response_type = AddonResponseType::Close;
+            }
+
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if addon.is_upgradable() {
+                    // if self.is_updating_addon(addon.id) {
+                    //     ui.add_enabled(false, egui::Button::new("Updating..."));
+                    // } else if ui.button(RichText::new("⮉ Update").heading()).clicked() {
+                    if ui.button(RichText::new("⮉ Update").heading()).clicked() {
+                        response.addon_id = addon.id;
+                        response.response_type = AddonResponseType::Update;
+                    }
+                }
+                if !addon.installed {
+                    // if self.is_installing_addon(addon.id) {
+                    //     ui.add_enabled(false, egui::Button::new("Installing..."));
+                    // } else if ui.button(RichText::new("⮋ Install").heading()).clicked() {
+                    if ui.button(RichText::new("⮋ Install").heading()).clicked() {
+                        response.addon_id = addon.id;
+                        response.response_type = AddonResponseType::Install
+                    }
+                } else if ui.button(RichText::new("🗙 Remove").heading()).clicked() {
+                    response.response_type = AddonResponseType::Remove;
+                    response.addon_id = addon.id;
+                }
+            });
         });
-        if addon.is_upgradable() {
-            if self.is_updating_addon(addon.id) {
-                ui.add_enabled(false, egui::Button::new("Updating..."));
-            } else if ui.button("Update").clicked() {
-                self.update_addon(addon.id, service);
+        ui.add_space(5.0);
+
+        ui.horizontal(|ui| {
+            // ui.horizontal(|ui| {
+            ui.label(RichText::new(addon.name.as_str()).heading().strong());
+            if addon
+                .download_total
+                .as_ref()
+                .unwrap()
+                .parse::<i32>()
+                .unwrap()
+                > 5000
+            {
+                ui_show_star(ui);
             }
-        }
-        if !addon.installed {
-            if self.is_installing_addon(addon.id) {
-                ui.add_enabled(false, egui::Button::new("Installing..."));
-            } else if ui.button("Install").clicked() {
-                self.install_addon(addon.id, service);
+            // });
+        });
+        ui.add_space(5.0);
+
+        ui.horizontal(|ui| {
+            if ui
+                .selectable_label(
+                    false,
+                    RichText::new(format!("by: {}", addon.author_name.as_str())),
+                )
+                .clicked()
+            {
+                response.author_name = addon.author_name;
+                response.response_type = AddonResponseType::AuthorName;
             }
-        }
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.hyperlink_to("Visit Website", addon.file_info_url);
+            });
+        });
+
+        ui.horizontal(|ui| {
+            // TODO: Add icon
+            ui.label(addon.category);
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                // TODO: pretty format date like: January 1, 2024
+                ui.label(format!("🕘 Updated {}", addon.date));
+            });
+        });
+        ui.horizontal(|ui| {
+            if let Some(compat_version) = addon.game_compat_version {
+                ui.label(format!(
+                    "⛭ {} ({}) Supported",
+                    addon.game_compat_name.unwrap(),
+                    compat_version
+                ));
+            } else {
+                ui.label("⛭ Unknown Version Supported");
+            }
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                // TODO: pretty print download count
+                ui.label(format!(
+                    "⮋ {} Downloads",
+                    addon.download_total.unwrap_or("".to_string())
+                ));
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label(format!("🔁 Version {}", addon.version));
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                // TODO: pretty print favorite count
+                ui.label(format!(
+                    "♥ {} Favorites",
+                    addon.favorite_total.unwrap_or("".to_string())
+                ));
+            });
+        });
         ui.separator();
 
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.show_changelog, false, "Details");
-            ui.selectable_value(&mut self.show_changelog, true, "Change Log");
+            ui.selectable_value(
+                &mut self.show_changelog,
+                false,
+                RichText::new("Details").heading(),
+            );
+            ui.selectable_value(
+                &mut self.show_changelog,
+                true,
+                RichText::new("Change Log").heading(),
+            );
             ui.checkbox(&mut self.show_raw_text, "Show Unformatted Text");
         });
         ui.separator();
 
-        // ui.vertical_centered_justified(|ui| {
         ScrollArea::vertical().show(ui, |ui| {
             if !self.show_changelog {
                 // show details
@@ -171,7 +212,16 @@ impl View for Details {
                 ui.label(addon.change_log.as_ref().unwrap_or(&"".to_string()));
             }
         });
-        // });
-        None
+        response
+    }
+}
+impl ResetView for Details {
+    fn reset(&mut self, service: &mut AddonService) {
+        // do not get if not addon id set yet
+        if self.addon_id == i32::default() {
+            return;
+        }
+        // re-get details for same addon
+        self.details.set(service.get_addon_details(self.addon_id));
     }
 }

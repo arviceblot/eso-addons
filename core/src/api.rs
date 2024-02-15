@@ -10,7 +10,9 @@ use tracing::info;
 use crate::config::Config;
 use crate::error::{self, Result};
 
+/// https://api.mmoui.com/v3/globalconfig.json
 const GLOBAL_CONFIG: &str = "globalconfig.json";
+/// https://api.mmoui.com/v3/game/ESO/gameconfig.json
 const GAME_ID: &str = "ESO";
 
 #[derive(Debug, Clone, Default)]
@@ -141,6 +143,7 @@ pub struct Category {
     #[serde(rename = "UICATTitle")]
     pub title: String,
     #[serde(rename = "UICATICON")]
+    /// Icon file download URL, usually jpg
     pub icon: String,
     #[serde(rename = "UICATFileCount")]
     pub file_count: String,
@@ -183,6 +186,12 @@ pub struct FileDetails {
 }
 
 #[derive(Deserialize)]
+pub struct Compatibility {
+    pub version: String,
+    pub name: String,
+}
+
+#[derive(Deserialize)]
 pub struct FileListItem {
     #[serde(rename = "UID")]
     pub id: String,
@@ -204,8 +213,26 @@ pub struct FileListItem {
     pub download_monthly: String,
     #[serde(rename = "UIFavoriteTotal")]
     pub favorite_total: String,
+    /// Game version compatibility.
+    /// In the form:
+    /// ```json
+    /// "UICompatibility": [
+    ///   {
+    ///     "version": "9.2.5",
+    ///     "name": "Endless Archive"
+    ///   }
+    /// ],
+    /// ```
+    #[serde(rename = "UICompatibility")]
+    pub compatibility: Option<Vec<Compatibility>>,
     #[serde(rename = "UIDir")]
     pub directories: Vec<String>,
+    // #[serde(rename = "UIIMG_Thumbs")]
+    // Screenshot thumbnail URLs
+    // pub image_thumbnails: Vec<String>,
+    // #[serde(rename = "UIIMGs")]
+    // Screenshot URLs
+    // pub images: Vec<String>,
 }
 
 fn convert_date<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>

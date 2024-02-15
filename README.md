@@ -70,6 +70,10 @@ cargo run eso-addon-manager
 
 AppImageLauncher has the option to automatically install updates, this app has been designed to take advantage of that using GitHub release information.
 
+## TODO
+
+- Add screenshot support for addons
+
 ## Legacy
 
 This project was originally based on the work by Trojan295 at [Trojan295/eso-addons](https://github.com/Trojan295/eso-addons). It has since devolved into the abyss, but without his work I probably would not have even started on this silliness.
