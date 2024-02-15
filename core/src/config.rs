@@ -3,7 +3,7 @@ use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::fs::{self, OpenOptions};
-use std::path::PathBuf;
+use std::path::{self, PathBuf};
 
 use tracing::log::info;
 
@@ -11,8 +11,9 @@ pub const EAM_DATA_DIR: &str = "eso-addons";
 pub const EAM_CONF: &str = "config.json";
 pub const EAM_DB: &str = "addons.db";
 
-//const STEAMDECK_DEFAULT_ADDON_DIR: &str = "/home/deck/.local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns";
+const STEAMDECK_DEFAULT_ADDON_DIR: &str = ".local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns";
 //const STEAMDECK_DEFAULT_CONFIG_DIR: &str = "/home/deck/.config";
+const WINDOWS_DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
 const LINUX_DEFAULT_ADDON_DIR: &str =
     "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
 
@@ -81,7 +82,10 @@ impl Config {
                         "Empty config data, loading defaults to: {}",
                         config_filepath.display()
                     );
-                    Config::default()
+                    Config {
+                        onboard: true,
+                        ..Default::default()
+                    }
                 } else {
                     info!("Loading config data at: {}", config_filepath.display());
                     serde_json::from_str(&config_data)
@@ -98,7 +102,10 @@ impl Config {
                     .write(true)
                     .open(&config_filepath)
                     .unwrap();
-                Config::default()
+                Config {
+                    onboard: true,
+                    ..Default::default()
+                }
             }
         };
 
@@ -145,4 +152,15 @@ fn default_addon_dir() -> PathBuf {
 #[cfg(target_os = "macos")]
 fn default_addon_dir() -> PathBuf {
     dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR)
+}
+
+pub fn detect_addon_dir() -> PathBuf {
+    let addon_dir = dirs::home_dir().unwrap();
+    for ext_path in [STEAMDECK_DEFAULT_ADDON_DIR, WINDOWS_DEFAULT_ADDON_DIR] {
+        let path_opt = addon_dir.join(ext_path);
+        if path_opt.exists() {
+            return path_opt;
+        }
+    }
+    addon_dir
 }

@@ -213,7 +213,6 @@ pub struct FileListItem {
     pub download_monthly: String,
     #[serde(rename = "UIFavoriteTotal")]
     pub favorite_total: String,
-    // #[serde(rename = "UICompatibility")]
     /// Game version compatibility.
     /// In the form:
     /// ```json
@@ -224,7 +223,8 @@ pub struct FileListItem {
     ///   }
     /// ],
     /// ```
-    // pub compatibility: Vec<Compatibility>,
+    #[serde(rename = "UICompatibility")]
+    pub compatibility: Option<Vec<Compatibility>>,
     #[serde(rename = "UIDir")]
     pub directories: Vec<String>,
     // #[serde(rename = "UIIMG_Thumbs")]

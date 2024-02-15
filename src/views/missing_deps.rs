@@ -1,66 +1,27 @@
-use eframe::egui;
-use eso_addons_core::service::result::{
-    AddonDepOption, AddonMap, AddonShowDetails, MissingDepView,
-};
-use eso_addons_core::service::AddonService;
+use eframe::egui::{self, Layout, RichText};
+use eso_addons_core::service::result::{AddonDepOption, AddonMap, MissingDepView};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use super::ui_helpers::{AddonResponse, PromisedValue};
+use super::ui_helpers::{AddonResponse, AddonResponseType};
 use super::View;
 
 #[derive(Default)]
 pub struct MissingDeps {
     missing_deps: HashMap<String, MissingDepView>,
-    installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     addon_names: Vec<String>,
     addon_map: AddonMap,
     rev_addon_map: HashMap<String, i32>,
-    init: bool,
-    install_new: PromisedValue<()>,
 }
 impl MissingDeps {
     pub fn new() -> Self {
         Self {
-            init: true,
             ..Default::default()
         }
     }
-    fn show_init(&mut self) -> bool {
-        let init = self.init;
-        if self.init {
-            self.init = false;
-        }
-        init
-    }
-    fn poll(&mut self, _service: &mut AddonService) {
-        self.installed_addons.poll();
-        if self.installed_addons.is_ready() {
-            self.installed_addons.handle();
-            for addon in self.installed_addons.value.as_ref().unwrap().iter() {
-                self.addon_map.insert(addon.id, addon.name.clone());
-                self.addon_names.push(addon.name.clone());
-            }
-            self.addon_names.sort_by_key(|a| a.to_lowercase());
-            for (id, name) in self.addon_map.iter() {
-                self.rev_addon_map.insert(name.clone(), *id);
-            }
-        }
 
-        // poll installing addons
-        self.install_new.poll();
-        if self.install_new.is_ready() {
-            self.install_new.handle();
-            self.missing_deps.clear();
-        }
-    }
-    fn get_installed_addons(&mut self, service: &mut AddonService) {
-        if self.installed_addons.is_polling() {
-            return;
-        }
-        self.installed_addons.set(service.get_installed_addons());
-    }
     fn install_missing_ready(&self) -> bool {
+        // ready to respond install is all options are marked as ignored or satisfied
         self.missing_deps
             .values()
             .all(|x| x.ignore || x.satisfied_by.is_some())
@@ -86,11 +47,14 @@ impl MissingDeps {
             }
         }
     }
-    fn install_new(&mut self, service: &mut AddonService) {
+    fn install_new(&mut self) -> AddonResponse {
         // Install selected missing dep addons or set to ignore
         let vecs: Vec<MissingDepView> = self.missing_deps.values().cloned().collect();
-        self.install_new
-            .set(service.install_missing_dependencies(vecs));
+        AddonResponse {
+            missing_deps: vecs,
+            response_type: AddonResponseType::InstallMissingDeps,
+            ..Default::default()
+        }
     }
 }
 
@@ -99,49 +63,49 @@ impl View for MissingDeps {
         &mut self,
         _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
-        service: &mut eso_addons_core::service::AddonService,
+        _service: &mut eso_addons_core::service::AddonService,
     ) -> AddonResponse {
-        let response = AddonResponse::default();
-        // get installed addons on init
-        if self.show_init() {
-            self.get_installed_addons(service);
-        }
-
-        // check poll for getting installed addons
-        self.poll(service);
-
-        // if installing addons, don't show everything else
-        if self.install_new.is_polling() {
-            ui.spinner();
-            return response;
-        }
+        let mut response = AddonResponse::default();
 
         // show missing deps when ready
         egui::TopBottomPanel::top("top_panel")
             .show_inside(ui, |ui| {
-                ui.heading("Missing Dependencies");
+                ui.add_space(5.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Missing Dependencies").heading().strong());
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_enabled_ui(self.install_missing_ready(), |ui| {
+                            if ui
+                                .button(RichText::new("Install").heading().strong())
+                                .clicked()
+                            {
+                                response = self.install_new();
+                            }
+                        });
+                    });
+                });
+                            ui.add_space(5.0);
                 ui.label("Some installed addons have missing dependencies. Please select whether the missing dependency should be ignored, is already satisfied by an existing addon, or install one of the suggested addons.");
+                ui.add_space(5.0);
             });
 
-        egui::TopBottomPanel::bottom("bottom_panel").show_inside(ui, |ui| {
-            ui.add_enabled_ui(self.install_missing_ready(), |ui| {
-                if ui.button("Install").clicked() {
-                    self.install_new(service);
-                }
-            });
-        });
+        if response.response_type != AddonResponseType::default() {
+            return response;
+        }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (missing_dir, dep_opt) in self.missing_deps.iter_mut() {
-                    ui.horizontal(|ui| {
-                        ui.strong(missing_dir);
+                    ui.strong(missing_dir);
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(format!("Required By: {}", dep_opt.required_by));
                     });
+                    ui.add_space(5.0);
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut dep_opt.ignore, "Ignore");
                         ui.add_enabled_ui(!dep_opt.ignore, |ui| {
                             // select from installed addons
+                            ui.label("Already Installed:");
                             egui::ComboBox::from_id_source(format!("satisfied_by_{}", missing_dir))
                                 .selected_text(
                                     self.addon_map
@@ -162,6 +126,7 @@ impl View for MissingDeps {
                                 });
                             if !dep_opt.options.is_empty() {
                                 // select from suggested addon
+                                ui.label("Install Suggested:");
                                 egui::ComboBox::from_id_source(format!("opt_by_{}", missing_dir))
                                     .selected_text(
                                         dep_opt

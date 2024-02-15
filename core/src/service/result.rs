@@ -79,6 +79,8 @@ pub struct AddonShowDetails {
     pub md5: Option<String>,
     pub description: Option<String>,
     pub change_log: Option<String>,
+    pub game_compat_version: Option<String>,
+    pub game_compat_name: Option<String>,
     // pub dirs: Vec<String>,
 }
 impl AddonShowDetails {
@@ -95,15 +97,11 @@ impl AddonShowDetails {
 #[derive(Default)]
 pub struct UpdateResult {
     pub addons_updated: Vec<AddonDetails>,
-    pub missing_deps: Vec<AddonDepOption>,
-    pub missing_details: Vec<i32>,
 }
 impl Clone for UpdateResult {
     fn clone(&self) -> Self {
         Self {
             addons_updated: self.addons_updated.to_vec(),
-            missing_deps: self.missing_deps.to_vec(),
-            missing_details: self.missing_details.to_vec(),
         }
     }
 }

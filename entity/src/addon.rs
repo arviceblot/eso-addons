@@ -37,6 +37,8 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Category,
+    #[sea_orm(has_many = "super::game_compatibility::Entity")]
+    GameCompatibility,
     #[sea_orm(has_many = "super::installed_addon::Entity")]
     InstalledAddon,
     #[sea_orm(has_many = "super::manual_dependency::Entity")]
@@ -64,6 +66,12 @@ impl Related<super::addon_dir::Entity> for Entity {
 impl Related<super::category::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Category.def()
+    }
+}
+
+impl Related<super::game_compatibility::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::GameCompatibility.def()
     }
 }
 

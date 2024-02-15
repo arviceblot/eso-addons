@@ -1,24 +1,20 @@
 use std::collections::HashMap;
 
 use super::{
-    ui_helpers::{
-        ui_show_addon_item, AddonResponse, AddonResponseType, AddonTable, PromisedValue, Sort,
-    },
-    View,
+    ui_helpers::{AddonResponse, AddonTable, PromisedValue, Sort},
+    ResetView, View,
 };
-use eframe::egui::{self, ScrollArea};
+use eframe::egui;
 use eso_addons_core::service::{
     result::{AddonShowDetails, CategoryResult},
     AddonService,
 };
-use itertools::Itertools;
 use strum::IntoEnumIterator;
 use tracing::log::info;
 
 #[derive(Default)]
 pub struct Search {
     results: PromisedValue<Vec<AddonShowDetails>>,
-    install_one: HashMap<i32, PromisedValue<()>>,
     search: String,
     is_init: bool,
     get_categories: PromisedValue<Vec<CategoryResult>>,
@@ -49,7 +45,7 @@ impl Search {
         }
     }
 
-    fn poll(&mut self, service: &mut AddonService) {
+    fn poll(&mut self) {
         self.get_categories.poll();
         if self.get_categories.is_ready() {
             self.get_categories.handle();
@@ -69,22 +65,6 @@ impl Search {
         if self.results.is_ready() {
             self.results.handle();
         }
-
-        let mut installed_addons = vec![];
-        for (addon_id, promise) in self.install_one.iter_mut() {
-            promise.poll();
-            if promise.is_ready() {
-                installed_addons.push(addon_id.to_owned());
-                promise.handle();
-            }
-        }
-        let fetch_addons = !installed_addons.is_empty();
-        for addon_id in installed_addons.iter() {
-            self.install_one.remove(addon_id);
-        }
-        if fetch_addons {
-            self.handle_search(service);
-        }
     }
 
     fn get_addons(&mut self, service: &AddonService) {
@@ -92,24 +72,11 @@ impl Search {
             .set(service.get_addons_by_category(self.selected_category));
     }
 
-    fn install_addon(&mut self, addon_id: i32, service: &mut AddonService) {
-        let mut promise = PromisedValue::<()>::default();
-        promise.set(service.install(addon_id, true));
-        self.install_one.insert(addon_id, promise);
-    }
-
-    fn is_installing_addon(&self, addon_id: i32) -> bool {
-        let promise = self.install_one.get(&addon_id);
-        if promise.is_some() && !promise.unwrap().is_ready() {
-            return true;
-        }
-        false
-    }
-
     fn get_cagetory_title(&self, category_id: i32) -> String {
         self.categories.get(&category_id).unwrap().title.to_owned()
     }
 
+    #[deprecated(since = "0.4.8", note = "please use `reset()` instead")]
     pub fn handle_search(&mut self, service: &mut AddonService) {
         let search_val = self.search.trim().to_lowercase();
         if search_val.is_empty() || self.results.is_polling() {
@@ -203,7 +170,7 @@ impl View for Search {
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
         self.handle_init(service);
-        self.poll(service);
+        self.poll();
 
         if self.get_categories.is_polling() {
             ui.spinner();
@@ -272,5 +239,12 @@ impl View for Search {
             response = AddonTable::new(&addons).installable(true).ui(ui);
         });
         response
+    }
+}
+impl ResetView for Search {
+    fn reset(&mut self, service: &mut AddonService) {
+        if self.is_init {
+            self.get_addons(service);
+        }
     }
 }

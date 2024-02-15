@@ -14,6 +14,7 @@ use entity::addon_detail as AddonDetail;
 use entity::addon_dir as AddonDir;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
+use entity::game_compatibility as GameCompat;
 use entity::installed_addon as InstalledAddon;
 use entity::manual_dependency as ManualDependency;
 use migration::{Condition, Migrator, MigratorTrait};
@@ -29,7 +30,7 @@ use sea_orm::{
 };
 use snafu::{ensure, ResultExt};
 use tempfile::NamedTempFile;
-use tracing::log::{self, info};
+use tracing::log::{self, error, info, warn};
 use zip::ZipArchive;
 
 mod fs_util;
@@ -184,10 +185,8 @@ impl AddonService {
         for _update in updates.iter() {
             // self.install(update.id, true).await.unwrap(); // TODO: add back?
         }
-        let need_installs = self.get_missing_dependency_options().await;
 
         let result = UpdateResult {
-            missing_deps: need_installs,
             ..Default::default()
         };
 
@@ -209,6 +208,7 @@ impl AddonService {
 
             let mut insert_addons = vec![];
             let mut insert_addon_dirs = vec![];
+            let mut insert_compats = vec![];
             let mut addon_ids = vec![];
             for list_item in file_list.iter() {
                 let addon_id: i32 = list_item.id.parse().unwrap();
@@ -226,12 +226,26 @@ impl AddonService {
                     favorite_total: ActiveValue::Set(Some(list_item.favorite_total.to_owned())),
                     ..Default::default()
                 };
+
+                // AddOn Directories
                 for addon_dir in list_item.directories.iter() {
                     let addon_dir_model = AddonDir::ActiveModel {
                         addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
                         dir: ActiveValue::Set(addon_dir.to_string()),
                     };
                     insert_addon_dirs.push(addon_dir_model);
+                }
+
+                // Game Compatibilty
+                if let Some(compats) = &list_item.compatibility {
+                    for (index, item) in compats.iter().enumerate() {
+                        insert_compats.push(GameCompat::ActiveModel {
+                            addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
+                            id: ActiveValue::Set(index.try_into().unwrap()),
+                            version: ActiveValue::Set(item.version.to_owned()),
+                            name: ActiveValue::Set(item.name.to_owned()),
+                        });
+                    }
                 }
 
                 insert_addons.push(addon);
@@ -257,7 +271,7 @@ impl AddonService {
                 .context(error::DbPutSnafu)?;
             // delete existing addon directories in case any are removed
             AddonDir::Entity::delete_many()
-                .filter(AddonDir::Column::AddonId.is_in(addon_ids))
+                .filter(AddonDir::Column::AddonId.is_in(addon_ids.to_owned()))
                 .exec(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
@@ -267,12 +281,22 @@ impl AddonService {
                 .await
                 .context(error::DbPutSnafu)?;
 
+            // Game Compatibility version
+            // delete existing entries for replacement
+            GameCompat::Entity::delete_many()
+                .filter(GameCompat::Column::AddonId.is_in(addon_ids))
+                .exec(&service.db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+            // insert new game compatibility records
+            GameCompat::Entity::insert_many(insert_compats)
+                .exec(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
+
             let mut result = UpdateResult::default();
             if upgrade_all {
                 result = service.upgrade().await.unwrap();
-            } else {
-                let need_installs = service.get_missing_dependency_options().await;
-                result.missing_deps = need_installs;
             }
 
             info!("Saving config");
@@ -287,7 +311,6 @@ impl AddonService {
         })
     }
 
-    #[allow(dead_code)]
     async fn get_missing_addon_detail_ids(&self) -> Result<Vec<i32>> {
         let mut results = vec![];
         info!("Getting addons with missing or outdated details");
@@ -424,6 +447,7 @@ impl AddonService {
     pub fn remove(&self, addon_id: i32) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
+            info!("Removing addon with id: {addon_id}");
             // check if valid addon ID
             let addon = DbAddon::Entity::find_by_id(addon_id)
                 .one(&service.db)
@@ -432,7 +456,7 @@ impl AddonService {
             match addon {
                 Some(_) => {}
                 None => {
-                    println!("Not a valid addon ID!");
+                    warn!("Not a valid addon ID!");
                     return Ok(());
                 }
             }
@@ -446,7 +470,7 @@ impl AddonService {
             match installed_addon {
                 Some(_) => {}
                 None => {
-                    println!("Addon not installed!");
+                    error!("Addon not installed!");
                     return Ok(());
                 }
             }
@@ -464,6 +488,7 @@ impl AddonService {
                 .context(error::DbDeleteSnafu)?;
             // delete installed addon directories
             fs_delete_addon(&service.get_addon_dir(), &installed_dirs).unwrap();
+            info!("Removed addon {}", addon.name);
 
             Ok(())
         })
@@ -479,6 +504,8 @@ impl AddonService {
                 .column_as(Category::Column::Title, "category")
                 .column_as(Expr::value("NULL"), "description")
                 .column_as(Expr::value("NULL"), "change_log")
+                .column_as(Expr::value("NULL"), "game_compat_version")
+                .column_as(Expr::value("NULL"), "game_compat_name")
                 .inner_join(Category::Entity)
                 .left_join(InstalledAddon::Entity)
                 .filter(DbAddon::Column::Name.like(format!("%{search_string}%").as_str()))
@@ -511,6 +538,8 @@ impl AddonService {
                 .column_as(Category::Column::Title, "category")
                 .column_as(Expr::value("NULL"), "description")
                 .column_as(Expr::value("NULL"), "change_log")
+                .column_as(Expr::value("NULL"), "game_compat_version")
+                .column_as(Expr::value("NULL"), "game_compat_name")
                 .inner_join(Category::Entity)
                 .inner_join(InstalledAddon::Entity)
                 .into_model::<AddonShowDetails>()
@@ -522,12 +551,15 @@ impl AddonService {
         })
     }
 
-    pub async fn get_missing_dependency_options(&self) -> Vec<AddonDepOption> {
-        info!("Checking for missing dependencies");
+    pub fn get_missing_dependency_options(&self) -> ImmediateValuePromise<Vec<AddonDepOption>> {
+        let db = self.db.clone();
 
-        AddonDepOption::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            r#"select
+        ImmediateValuePromise::new(async move {
+            info!("Checking for missing dependencies");
+
+            let results = AddonDepOption::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"select
             dependency_dir missing_dir,
             required_by,
             a.id option_id,
@@ -555,12 +587,14 @@ impl AddonService {
         left outer join manual_dependency m on dependency_dir = m.addon_dir
         where
             dependency_dir not in (select addon_dir from manual_dependency)"#,
-            [],
-        ))
-        .all(&self.db)
-        .await
-        .context(error::DbGetSnafu)
-        .unwrap()
+                [],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)
+            .unwrap();
+            Ok(results)
+        })
     }
 
     pub fn get_addon_details(
@@ -580,9 +614,19 @@ impl AddonService {
                 .column_as(Category::Column::Title, "category")
                 .column_as(AddonDetail::Column::Description, "description")
                 .column_as(AddonDetail::Column::ChangeLog, "change_log")
+                .column_as(GameCompat::Column::Version, "game_compat_version")
+                .column_as(GameCompat::Column::Name, "game_compat_name")
                 .inner_join(Category::Entity)
                 .inner_join(AddonDetail::Entity)
                 .left_join(InstalledAddon::Entity)
+                .left_join(GameCompat::Entity)
+                .filter(
+                    Condition::any().add(
+                        GameCompat::Column::Id
+                            .eq(0)
+                            .add(GameCompat::Column::Id.is_null()),
+                    ),
+                )
                 .into_model::<AddonShowDetails>()
                 .one(&service.db)
                 .await
@@ -813,6 +857,8 @@ impl AddonService {
                 .column_as(Category::Column::Title, "category")
                 .column_as(Expr::value("NULL"), "description")
                 .column_as(Expr::value("NULL"), "change_log")
+                .column_as(Expr::value("NULL"), "game_compat_version")
+                .column_as(Expr::value("NULL"), "game_compat_name")
                 .inner_join(Category::Entity)
                 .join_rev(
                     JoinType::InnerJoin,
@@ -947,6 +993,8 @@ impl AddonService {
                 .column_as(Category::Column::Title, "category")
                 .column_as(Expr::value("NULL"), "description")
                 .column_as(Expr::value("NULL"), "change_log")
+                .column_as(Expr::value("NULL"), "game_compat_version")
+                .column_as(Expr::value("NULL"), "game_compat_name")
                 .inner_join(Category::Entity)
                 .left_join(InstalledAddon::Entity)
                 .filter(DbAddon::Column::AuthorName.eq(author))

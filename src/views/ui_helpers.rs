@@ -8,7 +8,7 @@ use eframe::{
     emath::Align,
     epaint::{text::LayoutJob, Color32, FontId, Stroke},
 };
-use eso_addons_core::service::result::AddonShowDetails;
+use eso_addons_core::service::result::{AddonShowDetails, MissingDepView};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use strum_macros::EnumIter;
 
@@ -48,10 +48,10 @@ pub enum ViewOpt {
     /// Not really a reachable view, but a base
     Root,
     // Onboard,
-    // MissingDep,
+    MissingDeps,
     Installed,
     Search,
-    // Author,
+    Author,
     Settings,
     Details,
     Quit,
@@ -119,27 +119,46 @@ pub fn truncate(text: &String) -> String {
     text.to_string()
 }
 
-use egui_extras::{Column, TableBuilder, TableRow};
+use egui_extras::{Column, TableBuilder};
 
+#[derive(PartialEq)]
 pub enum AddonResponseType {
     None,
     AddonName,
+    /// Generic response that the installed addons have changed
+    AddonsChanged,
+    AuthorName,
+    /// Check for updates
+    CheckUpdate,
     Update,
+    UpdateMultiple,
     Install,
+    InstallMissingDeps,
     Remove,
     Close,
 }
+impl Default for AddonResponseType {
+    fn default() -> Self {
+        Self::None
+    }
+}
 pub struct AddonResponse {
     pub addon_id: i32,
+    pub addon_ids: Vec<i32>,
+    pub author_name: String,
     pub response_type: AddonResponseType,
     pub source: Option<ViewOpt>,
+    pub missing_deps: Vec<MissingDepView>,
 }
 impl Default for AddonResponse {
     fn default() -> Self {
         Self {
             addon_id: 0,
-            response_type: AddonResponseType::None,
+            addon_ids: vec![],
+            response_type: AddonResponseType::default(),
             source: None,
+            author_name: "".to_string(),
+            missing_deps: vec![],
         }
     }
 }

@@ -3,8 +3,13 @@
   <id>com.arviceblot.eso-addon-manager</id>
 
   <name>ESO AddOn Manager</name>
-  <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online.</summary>
+  <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online</summary>
   <developer_name>arviceblot</developer_name>
+  <developer id="arviceblot">
+    <name>
+      arviceblot
+    </name>
+  </developer>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
@@ -42,6 +47,26 @@
   </screenshots>
 
   <releases>
+    <release version="0.4.8" date="2024-02-15">
+      <description>
+        <p>
+          Version 0.4.8 is hear with a major UI update and the following changes:
+        </p>
+        <ul>
+          <li>New: Major internal changes to view handling and layout.</li>
+          <li>New: Game version support in addon detail view.</li>
+          <li>New: Author view. From any addon detail page, select the author name to see all other addons by them.</li>
+          <li>Change: AddOn lists now display all addons without truncating.</li>
+          <li>Change: Consolidated category and search pages for installing new addons.</li>
+          <li>Change: Missing dependencies are now reported on any missing addons.</li>
+          <li>Change: Missing dependencies view does not hog main window or prevent addon install.</li>
+          <li>Fix: Import from minion no longer results in endless spinner.</li>
+          <li>Fix: All relevant views now update on addon install status changes.</li>
+          <li>Fix: Onboarding now diplays on new installs.</li>
+          <li>Fix: Changing addon directory in settings should default to a valid directory in file dialog.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.7" date="2024-01-17">
       <description>
         <p>

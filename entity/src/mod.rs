@@ -8,5 +8,6 @@ pub mod addon_detail;
 pub mod addon_dir;
 pub mod category;
 pub mod category_parent;
+pub mod game_compatibility;
 pub mod installed_addon;
 pub mod manual_dependency;
