@@ -72,9 +72,7 @@ AppImageLauncher has the option to automatically install updates, this app has b
 
 ## TODO
 
-- Add game verison compatibility, from API into DB, updates, check compat with latest game version.
-- Add screenshot support for addons, cache to DB, thumbnails?
-- Author view from addon details, see all addons published by a specific author.
+- Add screenshot support for addons
 
 ## Legacy
 
