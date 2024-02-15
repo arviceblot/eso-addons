@@ -81,4 +81,13 @@
       </description>
     </release>
   </releases>
+  <categories>
+    <category>Games</category>
+  </categories>
+  <keywords>
+    <keyword>addons</keyword>
+    <keyword>eso</keyword>
+    <keyword>game</keyword>
+    <keyword>mods</keyword>
+  </keywords>
 </component>
