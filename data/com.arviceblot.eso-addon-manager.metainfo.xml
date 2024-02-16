@@ -4,7 +4,6 @@
 
   <name>ESO AddOn Manager</name>
   <summary>A cross-platform, unofficial addon manager for The Elder Scrolls Online</summary>
-  <developer_name>arviceblot</developer_name>
   <developer id="arviceblot">
     <name>
       arviceblot
@@ -82,7 +81,7 @@
     </release>
   </releases>
   <categories>
-    <category>Games</category>
+    <category>Utility</category>
   </categories>
   <keywords>
     <keyword>addons</keyword>
