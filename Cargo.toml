@@ -26,7 +26,7 @@ name = "eso-addon-manager"
 path = "src/main.rs"
 
 [dependencies]
-eframe = "0.26.1"
+eframe = "0.26.2"
 tokio = { version = "1.29.1", features = ["full"] }
 eso-addons-core = { path = "./core" }
 strum = "0.26.1"
