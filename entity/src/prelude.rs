@@ -4,6 +4,7 @@ pub use super::addon::Entity as Addon;
 pub use super::addon_dependency::Entity as AddonDependency;
 pub use super::addon_detail::Entity as AddonDetail;
 pub use super::addon_dir::Entity as AddonDir;
+pub use super::addon_image::Entity as AddonImage;
 pub use super::category::Entity as Category;
 pub use super::category_parent::Entity as CategoryParent;
 pub use super::game_compatibility::Entity as GameCompatibility;

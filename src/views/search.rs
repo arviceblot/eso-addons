@@ -236,7 +236,9 @@ impl View for Search {
                         .contains(self.search.to_lowercase().as_str())
                 })
                 .collect();
-            response = AddonTable::new(&addons).installable(true).ui(ui);
+            ui.centered_and_justified(|ui| {
+                response = AddonTable::new(&addons).installable(true).ui(ui);
+            });
         });
         response
     }

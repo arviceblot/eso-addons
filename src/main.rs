@@ -1,5 +1,6 @@
 use dotenv::dotenv;
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, vec2, RichText, Visuals};
+use eso_addons_core::config;
 use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use eso_addons_core::service::AddonService;
 use std::collections::HashMap;
@@ -32,12 +33,20 @@ async fn main() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 600.0]),
-        follow_system_theme: true,
+        follow_system_theme: true, // as of 2024-02-19, does not work on linux
         ..Default::default()
     };
 
     // TODO: consider moving service outside UI for lifetime?
-    eframe::run_native(APP_NAME, options, Box::new(|cc| Box::new(EamApp::new(cc))))
+    eframe::run_native(
+        APP_NAME,
+        options,
+        Box::new(|cc| {
+            // This gives us image support:
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Box::new(EamApp::new(cc))
+        }),
+    )
 }
 
 struct EamApp {
@@ -67,8 +76,6 @@ struct EamApp {
     hm_data: PromisedValue<()>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
-    /// Init handling after service available
-    init: bool,
     // Log subscriber
 }
 impl Default for EamApp {
@@ -97,7 +104,6 @@ impl Default for EamApp {
             hm_data: PromisedValue::default(),
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
-            init: false,
         }
     }
 }
@@ -115,18 +121,32 @@ impl EamApp {
         Self::default()
     }
 
-    /// Init some things after serice avilable
-    fn init(&mut self) {
-        if self.init {
-            return;
-        }
-        self.init = true;
-        self.check_update();
-    }
-
-    fn poll(&mut self) {
+    fn poll(&mut self, ctx: &egui::Context) {
         // track if any addons have changed so we can notify other views
         let mut addons_changed = false;
+
+        self.service.poll();
+        if self.service.is_ready() {
+            self.service.handle();
+            self.check_update();
+
+            // update style based on config on load
+            match self.service.value.as_ref().unwrap().config.style {
+                config::Style::Light => {
+                    ctx.style_mut(|style| {
+                        style.visuals = Visuals::light();
+                    });
+                }
+                config::Style::Dark => {
+                    ctx.style_mut(|style| {
+                        style.visuals = Visuals::dark();
+                    });
+                }
+                config::Style::System => {
+                    // nothing to do, this is default
+                }
+            }
+        }
 
         self.update.poll();
         if self.update.is_ready() && !self.installed_addons.is_polling() {
@@ -339,11 +359,10 @@ impl eframe::App for EamApp {
             self.handle_quit();
         }
 
-        self.poll();
+        self.poll(ctx);
 
         // check if sevice is ready before anything else!
         if !self.service.is_ready() {
-            self.service.poll();
             egui::CentralPanel::default().show(ctx, |ui| {
                 // ui.vertical_centered_justified(|ui| {
                 ui.centered_and_justified(|ui| {
@@ -353,7 +372,6 @@ impl eframe::App for EamApp {
             });
             return;
         }
-        self.init();
 
         // if we are loading addons, show spinner and that's it
         if self.update.is_polling() || self.installed_addons.is_polling() {
@@ -383,7 +401,7 @@ impl eframe::App for EamApp {
             .show(ctx, |ui| {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     ui.add_space(5.0);
-                    ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+                    ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
 
                     ui.selectable_value(
                         &mut self.view,

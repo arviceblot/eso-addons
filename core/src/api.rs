@@ -227,12 +227,12 @@ pub struct FileListItem {
     pub compatibility: Option<Vec<Compatibility>>,
     #[serde(rename = "UIDir")]
     pub directories: Vec<String>,
-    // #[serde(rename = "UIIMG_Thumbs")]
     // Screenshot thumbnail URLs
-    // pub image_thumbnails: Vec<String>,
-    // #[serde(rename = "UIIMGs")]
+    #[serde(rename = "UIIMG_Thumbs")]
+    pub image_thumbnails: Option<Vec<String>>,
     // Screenshot URLs
-    // pub images: Vec<String>,
+    #[serde(rename = "UIIMGs")]
+    pub images: Option<Vec<String>>,
 }
 
 fn convert_date<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>

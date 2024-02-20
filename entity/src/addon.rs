@@ -29,6 +29,8 @@ pub enum Relation {
     AddonDetail,
     #[sea_orm(has_many = "super::addon_dir::Entity")]
     AddonDir,
+    #[sea_orm(has_many = "super::addon_image::Entity")]
+    AddonImage,
     #[sea_orm(
         belongs_to = "super::category::Entity",
         from = "Column::CategoryId",
@@ -60,6 +62,12 @@ impl Related<super::addon_detail::Entity> for Entity {
 impl Related<super::addon_dir::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::AddonDir.def()
+    }
+}
+
+impl Related<super::addon_image::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AddonImage.def()
     }
 }
 
