@@ -1,6 +1,6 @@
 use tracing::log::info;
 
-use eframe::egui::{self, Layout, RichText, ScrollArea};
+use eframe::egui::{self, Layout, RichText};
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
 use strum::IntoEnumIterator;
 
@@ -132,27 +132,6 @@ impl View for Installed {
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
 
-        // egui::TopBottomPanel::bottom("installed_bottom").show(ctx, |ui| {
-        //     // log scroll area
-        //     egui::CollapsingHeader::new("Log")
-        //         .default_open(true)
-        //         .show(ui, |ui| {
-        //             ui.vertical_centered_justified(|ui| {
-        //                 ui.spacing_mut().item_spacing.x = 0.0;
-        //                 ScrollArea::vertical()
-        //                     .max_height(20.0)
-        //                     .stick_to_bottom(true)
-        //                     .show(ui, |ui| {
-        //                         ui.vertical(|ui| {
-        //                             for update in self.log.iter() {
-        //                                 ui.label(update);
-        //                             }
-        //                         });
-        //                     });
-        //             })
-        //         });
-        // });
-
         if self.displayed_addons.is_empty() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.centered_and_justified(|ui| {
@@ -224,7 +203,9 @@ impl View for Installed {
                             .contains(self.filter.to_lowercase().as_str())
                     })
                     .collect();
-                response = AddonTable::new(&addons).installable(true).ui(ui);
+                ui.centered_and_justified(|ui| {
+                    response = AddonTable::new(&addons).installable(true).ui(ui);
+                });
             });
         }
 

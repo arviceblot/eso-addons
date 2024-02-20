@@ -12,6 +12,7 @@ use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
 use entity::addon_dir as AddonDir;
+use entity::addon_image as AddonImage;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::game_compatibility as GameCompat;
@@ -45,37 +46,35 @@ pub struct AddonService {
     pub db: DatabaseConnection,
 }
 impl AddonService {
-    pub fn new() -> ImmediateValuePromise<AddonService> {
-        ImmediateValuePromise::new(async move {
-            // setup config
-            let config = Config::load();
+    pub async fn new() -> Self {
+        // setup config
+        let config = Config::load();
 
-            // init api/download client
-            // TODO: consider moving endpoint_url to config as default value
-            let mut client = ApiClient::new("https://api.mmoui.com/v3");
-            if config.file_list.is_empty() {
-                client.update_endpoints().await.unwrap();
-            } else {
-                client.update_endpoints_from_config(&config);
-            }
+        // init api/download client
+        // TODO: consider moving endpoint_url to config as default value
+        let mut client = ApiClient::new("https://api.mmoui.com/v3");
+        if config.file_list.is_empty() {
+            client.update_endpoints().await.unwrap();
+        } else {
+            client.update_endpoints_from_config(&config);
+        }
 
-            // create db file if not exists
-            let db_file = Config::default_db_path();
-            if !db_file.exists() {
-                File::create(&db_file).unwrap();
-            }
-            // setup database connection and apply migrations if needed
-            let mut opt = ConnectOptions::new(format!("sqlite://{}", db_file.to_string_lossy()));
-            opt.sqlx_logging_level(log::LevelFilter::Debug); // Setting SQLx log level
-            let db = sea_orm::Database::connect(opt).await.unwrap();
-            Migrator::up(&db, None).await.unwrap();
+        // create db file if not exists
+        let db_file = Config::default_db_path();
+        if !db_file.exists() {
+            File::create(&db_file).unwrap();
+        }
+        // setup database connection and apply migrations if needed
+        let mut opt = ConnectOptions::new(format!("sqlite://{}", db_file.to_string_lossy()));
+        opt.sqlx_logging_level(log::LevelFilter::Debug); // Setting SQLx log level
+        let db = sea_orm::Database::connect(opt).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
 
-            Ok(AddonService {
-                api: client,
-                config,
-                db,
-            })
-        })
+        Self {
+            api: client,
+            config,
+            db,
+        }
     }
 
     pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
@@ -209,6 +208,7 @@ impl AddonService {
             let mut insert_addons = vec![];
             let mut insert_addon_dirs = vec![];
             let mut insert_compats = vec![];
+            let mut insert_imgs = vec![];
             let mut addon_ids = vec![];
             for list_item in file_list.iter() {
                 let addon_id: i32 = list_item.id.parse().unwrap();
@@ -248,6 +248,20 @@ impl AddonService {
                     }
                 }
 
+                // AddOn Images
+                if let (Some(thumbs), Some(imgs)) = (&list_item.image_thumbnails, &list_item.images)
+                {
+                    let it = thumbs.iter().zip(imgs.iter());
+                    for (i, (thumb, img)) in it.enumerate() {
+                        insert_imgs.push(AddonImage::ActiveModel {
+                            addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
+                            index: ActiveValue::Set(i.try_into().unwrap()),
+                            thumbnail: ActiveValue::Set(thumb.to_owned()),
+                            image: ActiveValue::Set(img.to_owned()),
+                        })
+                    }
+                }
+
                 insert_addons.push(addon);
             }
             DbAddon::Entity::insert_many(insert_addons)
@@ -284,12 +298,25 @@ impl AddonService {
             // Game Compatibility version
             // delete existing entries for replacement
             GameCompat::Entity::delete_many()
-                .filter(GameCompat::Column::AddonId.is_in(addon_ids))
+                .filter(GameCompat::Column::AddonId.is_in(addon_ids.to_owned()))
                 .exec(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
             // insert new game compatibility records
             GameCompat::Entity::insert_many(insert_compats)
+                .exec(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
+
+            // AddOn Images
+            // delete existing entries for replacement
+            AddonImage::Entity::delete_many()
+                .filter(AddonImage::Column::AddonId.is_in(addon_ids))
+                .exec(&service.db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+            // insert new addon image URLs
+            AddonImage::Entity::insert_many(insert_imgs)
                 .exec(&service.db)
                 .await
                 .context(error::DbPutSnafu)?;
@@ -506,6 +533,7 @@ impl AddonService {
                 .column_as(Expr::value("NULL"), "change_log")
                 .column_as(Expr::value("NULL"), "game_compat_version")
                 .column_as(Expr::value("NULL"), "game_compat_name")
+                .column_as(Category::Column::Icon, "category_icon")
                 .inner_join(Category::Entity)
                 .left_join(InstalledAddon::Entity)
                 .filter(DbAddon::Column::Name.like(format!("%{search_string}%").as_str()))
@@ -540,6 +568,7 @@ impl AddonService {
                 .column_as(Expr::value("NULL"), "change_log")
                 .column_as(Expr::value("NULL"), "game_compat_version")
                 .column_as(Expr::value("NULL"), "game_compat_name")
+                .column_as(Category::Column::Icon, "category_icon")
                 .inner_join(Category::Entity)
                 .inner_join(InstalledAddon::Entity)
                 .into_model::<AddonShowDetails>()
@@ -616,6 +645,7 @@ impl AddonService {
                 .column_as(AddonDetail::Column::ChangeLog, "change_log")
                 .column_as(GameCompat::Column::Version, "game_compat_version")
                 .column_as(GameCompat::Column::Name, "game_compat_name")
+                .column_as(Category::Column::Icon, "category_icon")
                 .inner_join(Category::Entity)
                 .inner_join(AddonDetail::Entity)
                 .left_join(InstalledAddon::Entity)
@@ -859,6 +889,7 @@ impl AddonService {
                 .column_as(Expr::value("NULL"), "change_log")
                 .column_as(Expr::value("NULL"), "game_compat_version")
                 .column_as(Expr::value("NULL"), "game_compat_name")
+                .column_as(Category::Column::Icon, "category_icon")
                 .inner_join(Category::Entity)
                 .join_rev(
                     JoinType::InnerJoin,
@@ -995,6 +1026,7 @@ impl AddonService {
                 .column_as(Expr::value("NULL"), "change_log")
                 .column_as(Expr::value("NULL"), "game_compat_version")
                 .column_as(Expr::value("NULL"), "game_compat_name")
+                .column_as(Category::Column::Icon, "category_icon")
                 .inner_join(Category::Entity)
                 .left_join(InstalledAddon::Entity)
                 .filter(DbAddon::Column::AuthorName.eq(author))
@@ -1003,6 +1035,20 @@ impl AddonService {
                 .await
                 .context(error::DbGetSnafu)?;
             info!("Done getting addons!");
+            Ok(results)
+        })
+    }
+
+    pub fn get_addon_images(&self, addon_id: i32) -> ImmediateValuePromise<Vec<AddonImageResult>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let results = AddonImage::Entity::find()
+                .filter(AddonImage::Column::AddonId.eq(addon_id))
+                .order_by_asc(AddonImage::Column::Index)
+                .into_model::<AddonImageResult>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
             Ok(results)
         })
     }

@@ -3,7 +3,7 @@ use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::fs::{self, OpenOptions};
-use std::path::{self, PathBuf};
+use std::path::PathBuf;
 
 use tracing::log::info;
 
@@ -38,6 +38,18 @@ impl serde::Serialize for AddonEntry {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum Style {
+    Light,
+    Dark,
+    System,
+}
+impl Default for Style {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
     #[serde(default = "default_addon_dir")]
@@ -58,6 +70,8 @@ pub struct Config {
     pub onboard: bool,
     #[serde(default)]
     pub update_hm_data: bool,
+    #[serde(default)]
+    pub style: Style,
 }
 impl Config {
     pub fn load() -> Config {

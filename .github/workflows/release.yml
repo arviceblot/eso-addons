@@ -10,19 +10,24 @@ env:
 jobs:
   build:
     name: Build application
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            runs_on: ubuntu-latest
-          - target: x86_64-pc-windows-msvc
-            runs_on: windows-latest
-          - target: x86_64-apple-darwin
-            runs_on: macos-latest
+          - build: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+
+          - build: macos
+            os: macos-latest
+            target: x86_64-apple-darwin
+
+          - build: windows-gnu
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Install Rust toolchain "${{ matrix.target }}"
         uses: actions-rs/toolchain@v1
@@ -33,11 +38,11 @@ jobs:
           profile: minimal
 
       - name: Install packages
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           sudo apt update
-          sudo apt install libssl-dev
+          sudo apt install libssl-dev librust-atk-dev libgtk-3-dev
 
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
@@ -114,6 +119,10 @@ jobs:
     needs: [build, build_appimage]
     runs-on: ubuntu-latest
     steps:
+      - name: Get the release version from the tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
       - name: Download all artifacts
         uses: actions/download-artifact@v2
         with:
@@ -122,9 +131,8 @@ jobs:
       - name: Create Release And Publish These Artifacts
         uses: softprops/action-gh-release@v1
         with:
-          name: Release ${{ env.PROJECT_NAME }} ${{ github.ref }}
+          name: ${{ env.VERSION }}
           files: |
             artifacts/*/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

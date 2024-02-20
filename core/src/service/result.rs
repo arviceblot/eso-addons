@@ -81,6 +81,7 @@ pub struct AddonShowDetails {
     pub change_log: Option<String>,
     pub game_compat_version: Option<String>,
     pub game_compat_name: Option<String>,
+    pub category_icon: Option<String>,
     // pub dirs: Vec<String>,
 }
 impl AddonShowDetails {
@@ -118,4 +119,11 @@ pub struct CategoryResult {
     pub id: i32,
     pub title: String,
     pub file_count: Option<i32>,
+}
+
+#[derive(FromQueryResult, Default, Clone)]
+pub struct AddonImageResult {
+    pub index: i32,
+    pub thumbnail: String,
+    pub image: String,
 }

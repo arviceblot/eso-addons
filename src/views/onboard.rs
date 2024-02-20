@@ -1,18 +1,36 @@
-use eframe::egui::{self, Layout, RichText};
-use egui_file::FileDialog;
-use eso_addons_core::config::detect_addon_dir;
+use std::path::PathBuf;
+
+use eframe::egui::{self, Button, Layout, RichText};
+use eso_addons_core::{config::detect_addon_dir, service::AddonService};
+use lazy_async_promise::ImmediateValuePromise;
+use rfd::AsyncFileDialog;
 
 use crate::views::View;
 
-use super::ui_helpers::AddonResponse;
+use super::ui_helpers::{AddonResponse, PromisedValue};
 
 #[derive(Default)]
 pub struct Onboard {
-    open_addon_dir_dialog: Option<FileDialog>,
+    addon_dir_dialog: PromisedValue<Option<String>>,
     addon_dir_set: bool,
     setup_done: bool,
 }
 impl Onboard {
+    fn poll(&mut self, service: &mut AddonService) {
+        // poll change addon dir dialog
+        self.addon_dir_dialog.poll();
+        if self.addon_dir_dialog.is_ready() {
+            self.addon_dir_dialog.handle();
+            let value = self.addon_dir_dialog.value.as_ref().unwrap();
+            if let Some(path) = value {
+                service.config.addon_dir = PathBuf::from(path);
+                service.save_config();
+                self.addon_dir_set = true;
+            } else {
+                self.addon_dir_set = false;
+            }
+        }
+    }
     pub fn is_setup_done(&self) -> bool {
         self.addon_dir_set
     }
@@ -20,11 +38,14 @@ impl Onboard {
 impl View for Onboard {
     fn ui(
         &mut self,
-        ctx: &eframe::egui::Context,
+        _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
-        service: &mut eso_addons_core::service::AddonService,
+        service: &mut AddonService,
     ) -> AddonResponse {
         let response = AddonResponse::default();
+
+        self.poll(service);
+
         // welcome
         ui.add_space(5.0);
         ui.horizontal(|ui| {
@@ -54,22 +75,26 @@ impl View for Onboard {
         ui.heading("Let's start by finding the right foler to save your AddOns:");
         ui.add_space(5.0);
         // select game addon path
-        if ui
+        if self.addon_dir_dialog.is_polling() {
+            ui.add_enabled(
+                false,
+                Button::new(RichText::new("Select ESO AddOn folder...").heading()),
+            );
+        } else if ui
             .button(RichText::new("Select ESO AddOn folder...").heading())
             .clicked()
         {
-            let mut dialog = FileDialog::select_folder(Some(detect_addon_dir()));
-            dialog.open();
-            self.open_addon_dir_dialog = Some(dialog);
-        }
-        if let Some(dialog) = &mut self.open_addon_dir_dialog {
-            if dialog.show(ctx).selected() {
-                if let Some(dir) = dialog.path() {
-                    service.config.addon_dir = dir.to_path_buf();
-                    service.save_config();
-                    self.addon_dir_set = true;
+            let promise = ImmediateValuePromise::new(async move {
+                let dialog = AsyncFileDialog::new()
+                    .set_directory(detect_addon_dir())
+                    .pick_folder()
+                    .await;
+                if let Some(path) = dialog {
+                    return Ok(Some(path.path().to_string_lossy().to_string()));
                 }
-            }
+                Ok(None::<String>)
+            });
+            self.addon_dir_dialog.set(promise);
         }
         ui.add_space(5.0);
         ui.label(

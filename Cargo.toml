@@ -1,6 +1,6 @@
 [package]
 name = "eso-addon-manager"
-version = "0.4.8"
+version = "0.4.9"
 authors = [
     "arviceblot <github@relay.arviceblot.com>",
     "Damian Czaja <trojan295@protonmail.com>",
@@ -8,14 +8,6 @@ authors = [
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
-
-[package.metadata.appimage]
-auto_link = true
-auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
-args = [
-    "-u",
-    "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",
-]
 
 [workspace]
 members = [".", "core", "entity", "migration"]
@@ -25,17 +17,26 @@ members = [".", "core", "entity", "migration"]
 name = "eso-addon-manager"
 path = "src/main.rs"
 
+[package.metadata.appimage]
+auto_link = true
+auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
+args = [
+    "-u",
+    "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",
+]
+
 [dependencies]
-eframe = "0.26.1"
+eframe = "0.26.2"
 tokio = { version = "1.29.1", features = ["full"] }
 eso-addons-core = { path = "./core" }
 strum = "0.26.1"
 strum_macros = "0.26.1"
-egui_file = "0.15"
 itertools = "0.12.0"
 lazy_async_promise = "0.5.0"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 dotenv = "0.15.0"
 bbcode-tagger = "0.2.0"
-egui_extras = "0.26.1"
+egui_extras = { version = "*", features = ["all_loaders"] }
+image = { version = "0.24", features = ["jpeg", "png"] }
+rfd = "0.13.0"
