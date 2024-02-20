@@ -67,7 +67,7 @@ impl Settings {
 impl View for Settings {
     fn ui(
         &mut self,
-        _ctx: &egui::Context,
+        ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
@@ -75,28 +75,20 @@ impl View for Settings {
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                let mut use_system = service.config.style == config::Style::System;
-                if use_system {
-                    ui.add_enabled(false, Button::new(RichText::new("☀ Light").heading()));
-                    ui.add_enabled(false, Button::new(RichText::new("🌙 Dark").heading()));
-                } else {
-                    let mut style = ui.style_mut().to_owned();
-                    if ui.selectable_value(&mut style.visuals, Visuals::light(), RichText::new("☀ Light").heading()).clicked() {
-                        // update config
-                        service.config.style = config::Style::Light;
-                        service.config.save().unwrap();
-                    }
-                    else if ui.selectable_value(&mut style.visuals, Visuals::dark(), RichText::new("🌙 Dark").heading()).clicked() {
-                        // update config
-                        service.config.style = config::Style::Dark;
-                        service.config.save().unwrap();
-                    }
-                }
-                if ui.checkbox(&mut use_system, RichText::new("System Default").heading()).clicked() {
-                        // update config
+                if ui.selectable_label(service.config.style == config::Style::Light, RichText::new("☀ Light").heading()).clicked() {
+                    service.config.style = config::Style::Light;
+                    ctx.style_mut(|style| {
+                        style.visuals = Visuals::light();
+                    });
+                } else if ui.selectable_label(service.config.style == config::Style::Dark, RichText::new("🌙 Dark").heading()).clicked() {
+                    service.config.style = config::Style::Dark;
+                    ctx.style_mut(|style| {
+                        style.visuals = Visuals::dark();
+                    });
+                } else if ui.selectable_label(service.config.style == config::Style::System, RichText::new("Follow System").heading()).clicked() {
                     service.config.style = config::Style::System;
-                        service.config.save().unwrap();
                 }
+                ui.label("requires app restart to take effect")
             });
             ui.add_space(5.0);
 

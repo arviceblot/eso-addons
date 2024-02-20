@@ -46,37 +46,35 @@ pub struct AddonService {
     pub db: DatabaseConnection,
 }
 impl AddonService {
-    pub fn new() -> ImmediateValuePromise<AddonService> {
-        ImmediateValuePromise::new(async move {
-            // setup config
-            let config = Config::load();
+    pub async fn new() -> Self {
+        // setup config
+        let config = Config::load();
 
-            // init api/download client
-            // TODO: consider moving endpoint_url to config as default value
-            let mut client = ApiClient::new("https://api.mmoui.com/v3");
-            if config.file_list.is_empty() {
-                client.update_endpoints().await.unwrap();
-            } else {
-                client.update_endpoints_from_config(&config);
-            }
+        // init api/download client
+        // TODO: consider moving endpoint_url to config as default value
+        let mut client = ApiClient::new("https://api.mmoui.com/v3");
+        if config.file_list.is_empty() {
+            client.update_endpoints().await.unwrap();
+        } else {
+            client.update_endpoints_from_config(&config);
+        }
 
-            // create db file if not exists
-            let db_file = Config::default_db_path();
-            if !db_file.exists() {
-                File::create(&db_file).unwrap();
-            }
-            // setup database connection and apply migrations if needed
-            let mut opt = ConnectOptions::new(format!("sqlite://{}", db_file.to_string_lossy()));
-            opt.sqlx_logging_level(log::LevelFilter::Debug); // Setting SQLx log level
-            let db = sea_orm::Database::connect(opt).await.unwrap();
-            Migrator::up(&db, None).await.unwrap();
+        // create db file if not exists
+        let db_file = Config::default_db_path();
+        if !db_file.exists() {
+            File::create(&db_file).unwrap();
+        }
+        // setup database connection and apply migrations if needed
+        let mut opt = ConnectOptions::new(format!("sqlite://{}", db_file.to_string_lossy()));
+        opt.sqlx_logging_level(log::LevelFilter::Debug); // Setting SQLx log level
+        let db = sea_orm::Database::connect(opt).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
 
-            Ok(AddonService {
-                api: client,
-                config,
-                db,
-            })
-        })
+        Self {
+            api: client,
+            config,
+            db,
+        }
     }
 
     pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {

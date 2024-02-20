@@ -37,14 +37,16 @@ async fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
-    // TODO: consider moving service outside UI for lifetime?
+    // create service outside app
+    let service = AddonService::new().await;
+
     eframe::run_native(
         APP_NAME,
         options,
         Box::new(|cc| {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(EamApp::new(cc))
+            Box::new(EamApp::new(cc, service))
         }),
     )
 }
@@ -65,7 +67,7 @@ struct EamApp {
     missing_dep: MissingDeps,
     author_view: Author,
     /// Addon Service with async network/DB
-    service: PromisedValue<AddonService>,
+    service: AddonService,
     /// Addon management promises
     remove: PromisedValue<()>,
     update_one: HashMap<i32, PromisedValue<()>>,
@@ -76,14 +78,32 @@ struct EamApp {
     hm_data: PromisedValue<()>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
-    // Log subscriber
 }
-impl Default for EamApp {
-    fn default() -> Self {
-        let mut service = PromisedValue::<AddonService>::default();
-        service.set(AddonService::new());
 
-        EamApp {
+impl EamApp {
+    fn new(cc: &eframe::CreationContext<'_>, service: AddonService) -> Self {
+        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
+        // Restore app state using cc.storage (requires the "persistence" feature).
+        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
+        // for e.g. egui::PaintCallback.
+
+        // force repaint every 1 second for installs/updates
+        cc.egui_ctx.request_repaint_after(Duration::new(1, 0));
+
+        // set theme based on save config
+        if service.config.style != config::Style::System {
+            let style = match service.config.style {
+                config::Style::Light => Visuals::light(),
+                config::Style::Dark => Visuals::dark(),
+                config::Style::System => todo!(),
+            };
+            cc.egui_ctx.set_style(egui::Style {
+                visuals: style,
+                ..egui::Style::default()
+            });
+        }
+
+        let mut app = Self {
             view: ViewOpt::Installed,
             prev_view: ViewOpt::Root,
             view_stack: vec![ViewOpt::Root],
@@ -104,49 +124,32 @@ impl Default for EamApp {
             hm_data: PromisedValue::default(),
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
-        }
-    }
-}
-
-impl EamApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
-        // Restore app state using cc.storage (requires the "persistence" feature).
-        // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
-        // for e.g. egui::PaintCallback.
-
-        // force repaint every 1 second for installs/updates
-        cc.egui_ctx.request_repaint_after(Duration::new(1, 0));
-
-        Self::default()
+        };
+        // check for update on init
+        app.check_update();
+        app
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
         // track if any addons have changed so we can notify other views
         let mut addons_changed = false;
 
-        self.service.poll();
-        if self.service.is_ready() {
-            self.service.handle();
-            self.check_update();
-
-            // update style based on config on load
-            match self.service.value.as_ref().unwrap().config.style {
-                config::Style::Light => {
-                    ctx.style_mut(|style| {
-                        style.visuals = Visuals::light();
-                    });
-                }
-                config::Style::Dark => {
-                    ctx.style_mut(|style| {
-                        style.visuals = Visuals::dark();
-                    });
-                }
-                config::Style::System => {
-                    // nothing to do, this is default
-                }
-            }
-        }
+        // update style based on config on load
+        // match self.service.value.as_ref().unwrap().config.style {
+        //     config::Style::Light => {
+        //         ctx.style_mut(|style| {
+        //             style.visuals = Visuals::light();
+        //         });
+        //     }
+        //     config::Style::Dark => {
+        //         ctx.style_mut(|style| {
+        //             style.visuals = Visuals::dark();
+        //         });
+        //     }
+        //     config::Style::System => {
+        //         // nothing to do, this is default
+        //     }
+        // }
 
         self.update.poll();
         if self.update.is_ready() && !self.installed_addons.is_polling() {
@@ -241,8 +244,7 @@ impl EamApp {
         if self.view == ViewOpt::Details {
             return;
         }
-        self.details
-            .set_addon(addon_id, self.service.value.as_mut().unwrap());
+        self.details.set_addon(addon_id, &mut self.service);
         self.change_view(ViewOpt::Details);
     }
 
@@ -268,56 +270,41 @@ impl EamApp {
         // check for missing dependencies
         self.check_missing_deps();
         // update views
-        self.search.reset(self.service.value.as_mut().unwrap());
-        self.details.reset(self.service.value.as_mut().unwrap());
-        self.author_view.reset(self.service.value.as_mut().unwrap());
+        self.search.reset(&mut self.service);
+        self.details.reset(&mut self.service);
+        self.author_view.reset(&mut self.service);
     }
 
     fn remove_addon(&mut self, addon_id: i32) {
         let mut promise = PromisedValue::<()>::default();
-        promise.set(self.service.value.as_mut().unwrap().remove(addon_id));
+        promise.set(self.service.remove(addon_id));
         self.remove = promise;
     }
 
     fn update_addon(&mut self, addon_id: i32) {
         let mut promise = PromisedValue::<()>::default();
-        promise.set(self.service.value.as_mut().unwrap().install(addon_id, true));
+        promise.set(self.service.install(addon_id, true));
         self.update_one.insert(addon_id, promise);
     }
 
     fn install_addon(&mut self, addon_id: i32) {
         let mut promise = PromisedValue::<()>::default();
-        promise.set(
-            self.service
-                .value
-                .as_mut()
-                .unwrap()
-                .install(addon_id, false),
-        );
+        promise.set(self.service.install(addon_id, false));
         self.install_one.insert(addon_id, promise);
     }
 
     /// Check for updates but do not upgrade any addons
     fn check_update(&mut self) {
         info!("Checking for updates");
-        self.update
-            .set(self.service.value.as_mut().unwrap().update(false));
+        self.update.set(self.service.update(false));
         // check update TTC PriceTable
-        if self
-            .service
-            .value
-            .as_mut()
-            .unwrap()
-            .config
-            .update_ttc_pricetable
-        {
+        if self.service.config.update_ttc_pricetable {
             self.ttc_pricetable
-                .set(self.service.value.as_mut().unwrap().update_ttc_pricetable());
+                .set(self.service.update_ttc_pricetable());
         }
         // check HarvestMap data
-        if self.service.value.as_mut().unwrap().config.update_hm_data {
-            self.hm_data
-                .set(self.service.value.as_mut().unwrap().update_hm_data());
+        if self.service.config.update_hm_data {
+            self.hm_data.set(self.service.update_hm_data());
         }
     }
 
@@ -327,18 +314,13 @@ impl EamApp {
         }
         info!("Getting installed addons");
         self.installed_addons
-            .set(self.service.value.as_mut().unwrap().get_installed_addons());
+            .set(self.service.get_installed_addons());
     }
 
     /// Check for missing dependencies
     fn check_missing_deps(&mut self) {
-        self.missing_deps.set(
-            self.service
-                .value
-                .as_mut()
-                .unwrap()
-                .get_missing_dependency_options(),
-        );
+        self.missing_deps
+            .set(self.service.get_missing_dependency_options());
     }
 
     // endregion
@@ -346,7 +328,7 @@ impl EamApp {
     // region: Context Handlers
 
     fn handle_quit(&mut self) {
-        self.service.value.as_mut().unwrap().save_config();
+        self.service.save_config();
     }
 
     // endregion
@@ -361,18 +343,6 @@ impl eframe::App for EamApp {
 
         self.poll(ctx);
 
-        // check if sevice is ready before anything else!
-        if !self.service.is_ready() {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                // ui.vertical_centered_justified(|ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.spinner();
-                });
-                // })
-            });
-            return;
-        }
-
         // if we are loading addons, show spinner and that's it
         if self.update.is_polling() || self.installed_addons.is_polling() {
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -386,10 +356,9 @@ impl eframe::App for EamApp {
         }
 
         // check if need onboarding
-        if self.service.value.as_ref().unwrap().config.onboard {
+        if self.service.config.onboard {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.onboard
-                    .ui(ctx, ui, self.service.value.as_mut().unwrap());
+                self.onboard.ui(ctx, ui, &mut self.service);
             });
             return;
         }
@@ -440,39 +409,22 @@ impl eframe::App for EamApp {
             });
         egui::CentralPanel::default().show(ctx, |ui| {
             // check if need onboarding
-            if self.service.value.as_ref().unwrap().config.onboard {
-                self.onboard
-                    .ui(ctx, ui, self.service.value.as_mut().unwrap());
+            if self.service.config.onboard {
+                self.onboard.ui(ctx, ui, &mut self.service);
                 return;
             }
 
             let response: AddonResponse = match self.view {
-                ViewOpt::Installed => {
-                    self.installed_view
-                        .ui(ctx, ui, self.service.value.as_mut().unwrap())
-                }
-                ViewOpt::Search => self
-                    .search
-                    .ui(ctx, ui, self.service.value.as_mut().unwrap()),
-                ViewOpt::Settings => {
-                    self.settings
-                        .ui(ctx, ui, self.service.value.as_mut().unwrap())
-                }
-                ViewOpt::Details => self
-                    .details
-                    .ui(ctx, ui, self.service.value.as_mut().unwrap()),
+                ViewOpt::Installed => self.installed_view.ui(ctx, ui, &mut self.service),
+                ViewOpt::Search => self.search.ui(ctx, ui, &mut self.service),
+                ViewOpt::Settings => self.settings.ui(ctx, ui, &mut self.service),
+                ViewOpt::Details => self.details.ui(ctx, ui, &mut self.service),
                 ViewOpt::Quit => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     AddonResponse::default()
                 }
-                ViewOpt::Author => {
-                    self.author_view
-                        .ui(ctx, ui, self.service.value.as_mut().unwrap())
-                }
-                ViewOpt::MissingDeps => {
-                    self.missing_dep
-                        .ui(ctx, ui, self.service.value.as_mut().unwrap())
-                }
+                ViewOpt::Author => self.author_view.ui(ctx, ui, &mut self.service),
+                ViewOpt::MissingDeps => self.missing_dep.ui(ctx, ui, &mut self.service),
                 ViewOpt::Root => {
                     // should not be reachable with defaults
                     todo!();
@@ -485,7 +437,7 @@ impl eframe::App for EamApp {
                 }
                 AddonResponseType::AuthorName => {
                     self.author_view
-                        .author_name(response.author_name, self.service.value.as_mut().unwrap());
+                        .author_name(response.author_name, &self.service);
                     self.change_view(ViewOpt::Author);
                 }
                 AddonResponseType::CheckUpdate => {
@@ -497,9 +449,6 @@ impl eframe::App for EamApp {
                 AddonResponseType::InstallMissingDeps => {
                     self.install_missing_deps.set(
                         self.service
-                            .value
-                            .as_mut()
-                            .unwrap()
                             .install_missing_dependencies(response.missing_deps),
                     );
                     // this should only return from missing dep view, close it
