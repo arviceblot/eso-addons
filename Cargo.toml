@@ -9,14 +9,6 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
 
-[package.metadata.appimage]
-auto_link = true
-auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
-args = [
-    "-u",
-    "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",
-]
-
 [workspace]
 members = [".", "core", "entity", "migration"]
 # members = [".", "cli", "core", "entity", "migration"]
@@ -24,6 +16,14 @@ members = [".", "core", "entity", "migration"]
 [[bin]]
 name = "eso-addon-manager"
 path = "src/main.rs"
+
+[package.metadata.appimage]
+auto_link = true
+auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
+args = [
+    "-u",
+    "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",
+]
 
 [dependencies]
 eframe = "0.26.2"
