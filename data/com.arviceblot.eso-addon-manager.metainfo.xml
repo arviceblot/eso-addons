@@ -55,7 +55,7 @@
         <p>
           Version 0.4.9 brings images, bug fixes, and responsive layout improvements:
         </p>
-        <ui>
+        <ul>
           <li>New: Add screenshots view to details page.</li>
           <li>New: Add category icons to addon lists.</li>
           <li>New: Add file details view to details page.</li>
@@ -63,7 +63,7 @@
           <li>Change: Replace egui_file with rfd for native file dialogs.</li>
           <li>Fix: Issue with minion import button not reporting progress correctly.</li>
           <li>Fix: Addons lists not resizing.</li>
-        </ui>
+        </ul>
       </description>
     </release>
     <release version="0.4.8" date="2024-02-15">
