@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           sudo apt update
-          sudo apt install libssl-dev librust-atk-dev
+          sudo apt install libssl-dev librust-atk-dev libgtk-3-dev
 
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
