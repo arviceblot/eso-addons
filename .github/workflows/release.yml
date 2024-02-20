@@ -16,15 +16,15 @@ jobs:
         include:
           - build: linux
             os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-gnu
 
           - build: macos
             os: macos-latest
             target: x86_64-apple-darwin
 
-          - build: windows-gnu
+          - build: windows
             os: windows-latest
-            target: x86_64-pc-windows-gnu
+            target: x86_64-pc-windows-msvc
       fail-fast: false
     steps:
       - name: Checkout code
@@ -48,14 +48,12 @@ jobs:
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           command: build
           args: --release --verbose --target=${{ matrix.target }}
 
       - name: Test binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           command: test
           args: --release --verbose --target=${{ matrix.target }}
 
