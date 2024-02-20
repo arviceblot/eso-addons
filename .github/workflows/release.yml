@@ -25,6 +25,7 @@ jobs:
           - build: windows-gnu
             os: windows-latest
             target: x86_64-pc-windows-gnu
+      fail-fast: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -42,7 +43,7 @@ jobs:
         shell: bash
         run: |
           sudo apt update
-          sudo apt install libssl-dev librust-atk-dev libgtk-3-dev
+          sudo apt install libssl-dev librust-atk-dev libgtk-3-dev libglib2.0-dev
 
       - name: Build binary "${{ matrix.target }}"
         uses: actions-rs/cargo@v1
@@ -87,7 +88,9 @@ jobs:
 
       - name: Install packages
         run: |
+          sudo apt update
           sudo apt install zsync
+          sudo apt install libssl-dev librust-atk-dev libgtk-3-dev libglib2.0-dev
           cargo install --git https://github.com/StratusFearMe21/cargo-appimage.git
 
       - name: Install appimagetool
