@@ -1,7 +1,8 @@
 use std::fs::{self, File};
-use std::io::{self, Seek, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
+use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
 use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
 use crate::addons::{get_root_dir, Addon};
@@ -34,6 +35,7 @@ use tempfile::NamedTempFile;
 use tracing::log::{self, error, info, warn};
 use zip::ZipArchive;
 
+mod backup;
 mod fs_util;
 pub mod result;
 
@@ -52,8 +54,7 @@ impl AddonService {
         let config = Config::load();
 
         // init api/download client
-        // TODO: consider moving endpoint_url to config as default value
-        let mut client = ApiClient::new("https://api.mmoui.com/v3");
+        let mut client = ApiClient::default();
         if config.file_list.is_empty() {
             client.update_endpoints().await.unwrap();
         } else {
@@ -153,7 +154,7 @@ impl AddonService {
             check_db_result(result)?;
         }
 
-        // TODO: check missing depenency options after install
+        // leave check for missing depenency options after install to client
         Ok(())
     }
 
@@ -196,10 +197,6 @@ impl AddonService {
     pub fn update(&mut self, upgrade_all: bool) -> ImmediateValuePromise<UpdateResult> {
         let mut service = self.clone();
         ImmediateValuePromise::new(async move {
-            // update endpoints from api
-            // info!("Updating endpoints");
-            // service.api.update_endpoints().await.unwrap();
-
             // update categories
             service.update_categories().await?;
 
@@ -328,10 +325,22 @@ impl AddonService {
             }
 
             info!("Saving config");
-            service.config.file_details = service.api.file_details_url.to_owned();
-            service.config.file_list = service.api.file_list_url.to_owned();
-            service.config.list_files = service.api.list_files_url.to_owned();
-            service.config.category_list = service.api.category_list_url.to_owned();
+            service
+                .api
+                .file_details_url
+                .clone_into(&mut service.config.file_details);
+            service
+                .api
+                .file_list_url
+                .clone_into(&mut service.config.file_list);
+            service
+                .api
+                .list_files_url
+                .clone_into(&mut service.config.list_files);
+            service
+                .api
+                .category_list_url
+                .clone_into(&mut service.config.category_list);
 
             service.config.save()?;
 
@@ -675,9 +684,17 @@ impl AddonService {
         })
     }
 
+    // region: Config
+
+    pub fn save_config(&self) {
+        self.config.save().unwrap();
+    }
+
     fn get_addon_dir(&self) -> PathBuf {
         self.config.addon_dir.clone()
     }
+
+    // endregion
 
     async fn base_fs_download_extract(
         &self,
@@ -796,10 +813,6 @@ impl AddonService {
         })
     }
 
-    pub fn save_config(&self) {
-        self.config.save().unwrap();
-    }
-
     pub fn import_minion_file(&mut self, file: &Path) -> ImmediateValuePromise<()> {
         // Takes a path to a minion backup file, it should be named something like `BU-addons.txt`
         // It should contain a single line of comma-separated addon IDs
@@ -818,7 +831,6 @@ impl AddonService {
                 .map(|x| x.parse::<i32>().unwrap())
                 .collect();
             // workaround for weird behavior with promise in promise, slowly install addons one at a time
-            // TODO: consider using different promise to report install progress back to OG thread
             for addon_id in ids.iter() {
                 service.p_install(*addon_id, false).await.unwrap();
             }
@@ -1056,6 +1068,86 @@ impl AddonService {
             Ok(results)
         })
     }
+
+    // region: Backup/restore data
+
+    /// Backup installed addon data to file
+    pub fn backup_data(&self, file: PathBuf) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let installed_addons = InstalledAddon::Entity::find()
+                .column(InstalledAddon::Column::AddonId)
+                .column(InstalledAddon::Column::Version)
+                .into_model::<BackupInstalledAddon>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let manual_deps = ManualDependency::Entity::find()
+                .into_model::<BackupManualDependency>()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let backup_data = BackupData {
+                installed_addons,
+                manual_dependencies: manual_deps,
+            };
+
+            serde_json::to_writer(&File::create(file)?, &backup_data)?;
+            Ok(())
+        })
+    }
+
+    /// Restore backed up data from file to database
+    pub fn restore_backup(&self, file: PathBuf) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let mut f = File::open(file)?;
+            let mut buf = String::new();
+            f.read_to_string(&mut buf)?;
+
+            let data: BackupData = serde_json::from_str(&buf)?;
+
+            if !data.installed_addons.is_empty() {
+                // remove existing installed data
+                InstalledAddon::Entity::delete_many().exec(&db).await?;
+
+                // import installed addon data
+                let mut installed_addons = vec![];
+                for x in data.installed_addons {
+                    installed_addons.push(InstalledAddon::ActiveModel {
+                        addon_id: ActiveValue::Set(x.addon_id),
+                        version: ActiveValue::Set("0".to_owned()),
+                        date: ActiveValue::Set(x.date),
+                    })
+                }
+                InstalledAddon::Entity::insert_many(installed_addons)
+                    .exec(&db)
+                    .await?;
+            }
+
+            if !data.manual_dependencies.is_empty() {
+                // remove existing manual dep data
+                ManualDependency::Entity::delete_many().exec(&db).await?;
+
+                // import manual dep data
+                let mut dep_inserts = vec![];
+                for x in data.manual_dependencies {
+                    dep_inserts.push(ManualDependency::ActiveModel {
+                        addon_dir: ActiveValue::Set(x.addon_dir),
+                        satisfied_by: ActiveValue::Set(x.satisfied_by),
+                        ignore: ActiveValue::Set(x.ignore),
+                    });
+                }
+                ManualDependency::Entity::insert_many(dep_inserts)
+                    .exec(&db)
+                    .await?;
+            }
+
+            Ok(())
+        })
+    }
+
+    // endregion
 }
 
 /// Use for inserts where no updates/inserts OK

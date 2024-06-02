@@ -39,7 +39,7 @@ impl MissingDeps {
                     v.insert(missing_dep)
                 }
             };
-            dep_view.missing_dir = dep.missing_dir.clone();
+            dep_view.missing_dir.clone_from(&dep.missing_dir);
             if let Some(option_id) = dep.option_id {
                 dep_view
                     .options

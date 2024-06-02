@@ -14,8 +14,10 @@ use crate::error::{self, Result};
 const GLOBAL_CONFIG: &str = "globalconfig.json";
 /// https://api.mmoui.com/v3/game/ESO/gameconfig.json
 const GAME_ID: &str = "ESO";
+/// Current configuration for v3 API
+const ENDPOINT_URL: &str = "https://api.mmoui.com/v3";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ApiClient {
     endpoint_url: String,
     pub client: reqwest::Client,
@@ -24,6 +26,12 @@ pub struct ApiClient {
     pub file_details_url: String,
     pub list_files_url: String,
     pub category_list_url: String,
+}
+
+impl Default for ApiClient {
+    fn default() -> Self {
+        Self::new(ENDPOINT_URL)
+    }
 }
 
 impl ApiClient {
@@ -59,10 +67,10 @@ impl ApiClient {
     }
 
     pub fn update_endpoints_from_config(&mut self, config: &Config) {
-        self.file_list_url = config.file_list.to_owned();
-        self.file_details_url = config.file_details.to_owned();
-        self.list_files_url = config.list_files.to_owned();
-        self.category_list_url = config.category_list.to_owned();
+        config.file_list.clone_into(&mut self.file_list_url);
+        config.file_details.clone_into(&mut self.file_details_url);
+        config.list_files.clone_into(&mut self.list_files_url);
+        config.category_list.clone_into(&mut self.category_list_url);
     }
 
     pub async fn get_file_list(&mut self) -> Result<Vec<FileListItem>> {
