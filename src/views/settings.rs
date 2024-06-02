@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Button, RichText, ScrollArea, Visuals};
+use egui_tracing::tracing::collector::EventCollector;
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
 use lazy_async_promise::ImmediateValuePromise;
@@ -15,12 +16,26 @@ use super::ui_helpers::{AddonResponse, AddonResponseType, PromisedValue};
 pub struct Settings {
     // opened_file: Option<PathBuf>,
     addon_dir_dialog: PromisedValue<Option<String>>,
+
     minion_dialog: PromisedValue<Option<String>>,
     minion_import: Option<PromisedValue<()>>,
-    visuals: Visuals,
-    // open_addon_dir_dialog: Option<FileDialog>,
+
+    backup_dialog: PromisedValue<Option<String>>,
+    backup_process: Option<PromisedValue<()>>,
+
+    restore_dialog: PromisedValue<Option<String>>,
+    restore_process: Option<PromisedValue<()>>,
+
+    collector: EventCollector,
 }
 impl Settings {
+    pub fn new(collector: EventCollector) -> Self {
+        Self {
+            collector,
+            ..Default::default()
+        }
+    }
+
     fn poll(&mut self, service: &mut AddonService) -> AddonResponse {
         let mut response = AddonResponse::default();
 
@@ -57,6 +72,48 @@ impl Settings {
             if self.minion_import.as_ref().unwrap().is_ready() {
                 // clear promise
                 self.minion_import = None;
+                response.response_type = AddonResponseType::AddonsChanged;
+            }
+        }
+
+        // poll backup file dialog
+        self.backup_dialog.poll();
+        if self.backup_dialog.is_ready() {
+            self.backup_dialog.handle();
+            let value = self.backup_dialog.value.as_ref().unwrap();
+            if let Some(path) = value {
+                let mut promise = PromisedValue::<()>::default();
+                promise.set(service.backup_data(PathBuf::from(path)));
+                self.backup_process = Some(promise);
+            }
+        }
+
+        // poll backup process
+        if self.backup_process.is_some() {
+            self.backup_process.as_mut().unwrap().poll();
+            if self.backup_process.as_ref().unwrap().is_ready() {
+                self.backup_process = None;
+            }
+        }
+
+        // poll restore file dialog
+        self.restore_dialog.poll();
+        if self.restore_dialog.is_ready() {
+            self.restore_dialog.handle();
+            let value = self.restore_dialog.value.as_ref().unwrap();
+            if let Some(path) = value {
+                let mut promise = PromisedValue::<()>::default();
+                promise.set(service.restore_backup(PathBuf::from(path)));
+                self.restore_process = Some(promise);
+            }
+        }
+
+        // poll restore process
+        if self.restore_process.is_some() {
+            self.restore_process.as_mut().unwrap().poll();
+            if self.restore_process.as_ref().unwrap().is_ready() {
+                self.restore_process = None;
+                // addons have changed, notify appropriately
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }
@@ -206,10 +263,64 @@ impl View for Settings {
 
             ui.label(RichText::new("Troubleshooting").heading());
             ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                if ui.button(RichText::new("Backup").heading()).clicked() {
+                    // open backup file dialog
+                    let promise = ImmediateValuePromise::new(async move {
+                    let dialog = AsyncFileDialog::new()
+                        .add_filter("json", &["json"])
+                        .set_directory("~/")
+                        .save_file()
+                        .await;
+                        if let Some(path) = dialog {
+                            return Ok(Some(path.path().to_string_lossy().to_string()));
+                        }
+                        Ok(None::<String>)
+                    });
+                    self.backup_dialog.set(promise);
+                }
+                if ui.button(RichText::new("Restore").heading()).clicked() {
+                    // open restore file dialog
+                    let promise = ImmediateValuePromise::new(async move {
+                        let dialog = AsyncFileDialog::new()
+                            .add_filter("json", &["json"])
+                            .set_directory("~/")
+                            .pick_file()
+                            .await;
+                            if let Some(path) = dialog {
+                                return Ok(Some(path.path().to_string_lossy().to_string()));
+                            }
+                            Ok(None::<String>)
+                        });
+                        self.restore_dialog.set(promise);
+                }
+            });
+            ui.add_space(5.0);
             if let Some(repo) = REPO {
                 ui.hyperlink_to("Report an issue", format!("{repo}/issues"));
             }
+            ui.add_space(5.0);
             // log button to open log output window
+            // TODO: Enable when egui_tracing updated to support newer egui
+            // if ui.button("Logs").clicked() {
+            //     ctx.show_viewport_immediate(
+            //         egui::ViewportId::from_hash_of("log_viewport"),
+            //         egui::ViewportBuilder::default()
+            //             .with_title("Logs")
+            //             .with_resizable(true)
+            //             .with_inner_size([800.0, 600.0]),
+            //         |ctx, class| {
+            //             assert!(
+            //                 class == egui::ViewportClass::Immediate,
+            //                 "This egui backend doesn't support multiple viewports"
+            //             );
+    
+            //             egui::CentralPanel::default().show(ctx, |ui| {
+            //                 ui.add(egui_tracing::Logs::new(self.collector.clone()))
+            //             });
+            //         },
+            //     );
+            // }
             ui.add_space(5.0);
             ui.separator();
             ui.add_space(5.0);

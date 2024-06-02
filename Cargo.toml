@@ -1,6 +1,6 @@
 [package]
 name = "eso-addon-manager"
-version = "0.4.9"
+version = "0.4.10"
 authors = [
     "arviceblot <github@relay.arviceblot.com>",
     "Damian Czaja <trojan295@protonmail.com>",
@@ -40,3 +40,5 @@ bbcode-tagger = "0.2.0"
 egui_extras = { version = "*", features = ["all_loaders"] }
 image = { version = "0.24", features = ["jpeg", "png"] }
 rfd = "0.13.0"
+hostname = "0.3.1"
+egui_tracing = "0.2.1"

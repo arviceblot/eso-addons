@@ -14,8 +14,10 @@ use crate::error::{self, Result};
 const GLOBAL_CONFIG: &str = "globalconfig.json";
 /// https://api.mmoui.com/v3/game/ESO/gameconfig.json
 const GAME_ID: &str = "ESO";
+/// Current configuration for v3 API
+const ENDPOINT_URL: &str = "https://api.mmoui.com/v3";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ApiClient {
     endpoint_url: String,
     pub client: reqwest::Client,
@@ -24,6 +26,12 @@ pub struct ApiClient {
     pub file_details_url: String,
     pub list_files_url: String,
     pub category_list_url: String,
+}
+
+impl Default for ApiClient {
+    fn default() -> Self {
+        Self::new(ENDPOINT_URL)
+    }
 }
 
 impl ApiClient {

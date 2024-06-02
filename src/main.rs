@@ -1,11 +1,17 @@
 use dotenv::dotenv;
 use eframe::egui::{self, vec2, RichText, Visuals};
+use egui_tracing::tracing::collector::EventCollector;
 use eso_addons_core::config;
 use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use eso_addons_core::service::AddonService;
+use itertools::any;
+use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
 use std::time::Duration;
+use tracing::error;
 use tracing::log::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use views::author::Author;
 
 mod views;
@@ -26,13 +32,21 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() -> Result<(), eframe::Error> {
     dotenv().ok();
 
+    let collector = egui_tracing::EventCollector::default();
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_test_writer()
         .init();
+    // tracing_subscriber::registry()
+    //     .with(collector.clone())
+    //     .init();
 
+    let hostname = hostname::get().unwrap();
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([960.0, 600.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([960.0, 600.0])
+            .with_min_inner_size([640.0, 400.0])
+            .with_fullscreen(hostname == "steamdeck"), // attempt steamdeck resolution fix in game mode
         follow_system_theme: true, // as of 2024-02-19, does not work on linux
         ..Default::default()
     };
@@ -46,7 +60,7 @@ async fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(EamApp::new(cc, service))
+            Box::new(EamApp::new(cc, service, collector))
         }),
     )
 }
@@ -75,13 +89,17 @@ struct EamApp {
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     update: PromisedValue<UpdateResult>,
     ttc_pricetable: PromisedValue<()>,
-    hm_data: PromisedValue<()>,
+    hm_data: Option<ImmediateValuePromise<()>>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
 }
 
 impl EamApp {
-    fn new(cc: &eframe::CreationContext<'_>, service: AddonService) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        service: AddonService,
+        collector: EventCollector,
+    ) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
@@ -109,7 +127,7 @@ impl EamApp {
             view_stack: vec![ViewOpt::Root],
             installed_view: Installed::new(),
             search: Search::new(),
-            settings: Settings::default(),
+            settings: Settings::new(collector),
             service,
             details: Details::default(),
             onboard: Onboard::default(),
@@ -121,7 +139,7 @@ impl EamApp {
             installed_addons: PromisedValue::default(),
             update: PromisedValue::default(),
             ttc_pricetable: PromisedValue::default(),
-            hm_data: PromisedValue::default(),
+            hm_data: None,
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
         };
@@ -130,26 +148,9 @@ impl EamApp {
         app
     }
 
-    fn poll(&mut self, ctx: &egui::Context) {
+    fn poll(&mut self) {
         // track if any addons have changed so we can notify other views
         let mut addons_changed = false;
-
-        // update style based on config on load
-        // match self.service.value.as_ref().unwrap().config.style {
-        //     config::Style::Light => {
-        //         ctx.style_mut(|style| {
-        //             style.visuals = Visuals::light();
-        //         });
-        //     }
-        //     config::Style::Dark => {
-        //         ctx.style_mut(|style| {
-        //             style.visuals = Visuals::dark();
-        //         });
-        //     }
-        //     config::Style::System => {
-        //         // nothing to do, this is default
-        //     }
-        // }
 
         self.update.poll();
         if self.update.is_ready() && !self.installed_addons.is_polling() {
@@ -163,11 +164,25 @@ impl EamApp {
             info!("Updated TTC PriceTable.");
             self.ttc_pricetable.handle();
         }
-        self.hm_data.poll();
-        if self.hm_data.is_ready() {
-            info!("Updated HarvestMap data.");
-            self.hm_data.handle();
+
+        if let Some(hm_data) = self.hm_data.as_mut() {
+            match hm_data.poll_state() {
+                ImmediateValueState::Updating => {}
+                ImmediateValueState::Success(_) => {
+                    info!("Updated HarvestMap data.");
+                    self.hm_data = None;
+                }
+                ImmediateValueState::Error(_) => {
+                    // TODO: handle errors better
+                    error!("HM error!");
+                    self.hm_data = None;
+                }
+                ImmediateValueState::Empty => todo!(),
+            }
         }
+        // if self.hm_data.is_ready() {
+        //     self.hm_data.handle();
+        // }
 
         self.installed_addons.poll();
         if self.installed_addons.is_ready() {
@@ -249,7 +264,6 @@ impl EamApp {
     }
 
     fn change_view(&mut self, view: ViewOpt) {
-        // TODO: consider if we should allow view change from important things like missing deps or onboarding
         self.view_stack.push(self.view);
         self.prev_view = self.view;
         self.view = view;
@@ -304,7 +318,7 @@ impl EamApp {
         }
         // check HarvestMap data
         if self.service.config.update_hm_data {
-            self.hm_data.set(self.service.update_hm_data());
+            self.hm_data = Some(self.service.update_hm_data());
         }
     }
 
@@ -341,7 +355,7 @@ impl eframe::App for EamApp {
             self.handle_quit();
         }
 
-        self.poll(ctx);
+        self.poll();
 
         // if we are loading addons, show spinner and that's it
         if self.update.is_polling() || self.installed_addons.is_polling() {
@@ -405,6 +419,20 @@ impl eframe::App for EamApp {
                         ViewOpt::Quit,
                         RichText::new("⊗ Quit").heading(),
                     );
+                });
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    // show active progress items
+                    if self.update.is_polling()
+                        || self.ttc_pricetable.is_polling()
+                        || self.hm_data.is_some()
+                        || any(self.install_one.values(), |x| x.is_polling())
+                        || any(self.update_one.values(), |x| x.is_polling())
+                    {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Updating");
+                        });
+                    }
                 });
             });
         egui::CentralPanel::default().show(ctx, |ui| {

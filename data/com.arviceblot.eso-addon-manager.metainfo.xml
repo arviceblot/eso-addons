@@ -50,6 +50,21 @@
   </screenshots>
 
   <releases>
+    <release version="0.4.10" date="2024-03-19">
+      <description>
+        <p>
+          Version 0.4.10 includes backup/restore feature, minor fixes:
+        </p>
+        <ul>
+          <li>New: Add backup/restore functionality, making addon lists more portable</li>
+          <li>New: Add indicator for main process tasks</li>
+          <li>Change: Update dependencies</li>
+          <li>Change: Set minimum window size</li>
+          <li>Change: Fullscreen mode on steamdeck to attempt resolution fix</li>
+          <li>Remove: No longer used dependencies</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.9" date="2024-02-20">
       <description>
         <p>

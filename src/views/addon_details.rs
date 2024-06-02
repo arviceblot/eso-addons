@@ -35,6 +35,7 @@ pub struct Details {
     show_raw_text: bool,
     images: PromisedValue<Vec<AddonImageResult>>,
     selected_image: String,
+    markdown: String,
 }
 
 impl Details {

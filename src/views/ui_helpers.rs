@@ -3,7 +3,7 @@ use std::fmt;
 use tracing::log::error;
 
 use eframe::{
-    egui::{self, vec2, Image, Label, Layout, Response, RichText, TextFormat},
+    egui::{self, vec2, Image, Label, Layout, RichText, TextFormat},
     emath::Align,
     epaint::{text::LayoutJob, Color32, FontId, Stroke},
 };
@@ -318,165 +318,15 @@ impl<'a> AddonTable<'a> {
                             });
                         });
                     });
-
-                    // col2:
-                    // download total
-                    // favorites
-                    // version
-                    // row.col(|ui| {
-                    //     ui.vertical(|ui| {
-                    //         let default = String::new();
-                    //         let installed_version =
-                    //             addon.installed_version.as_ref().unwrap_or(&default);
-                    //         if addon.is_upgradable() {
-                    //             ui.vertical_centered(|ui| {
-                    //                 ui.label(
-                    //                     RichText::new(addon.version.as_str()).color(Color32::GREEN),
-                    //                 );
-                    //                 ui.label(installed_version);
-                    //             });
-                    //         } else {
-                    //             if addon.download_total.is_some() {
-                    //                 // "⮋" downloads
-                    //                 ui.add(
-                    //                     Label::new(format!(
-                    //                         "⮋ {}",
-                    //                         addon.download_total.as_ref().unwrap().as_str()
-                    //                     ))
-                    //                     .wrap(false),
-                    //                 );
-                    //             }
-                    //             if addon.favorite_total.is_some() {
-                    //                 // "♥" favorites
-                    //                 ui.add(
-                    //                     Label::new(format!(
-                    //                         "♥ {}",
-                    //                         addon.favorite_total.as_ref().unwrap().as_str()
-                    //                     ))
-                    //                     .wrap(false),
-                    //                 );
-                    //             }
-                    //             // "🔃" version
-                    //             ui.add(
-                    //                 Label::new(format!("🔃 {}", truncate_len(&addon.version, 17)))
-                    //                     .wrap(false),
-                    //             );
-                    //         }
-                    //     });
-                    // });
-
-                    // col3: install/update button?
-                    // row.col(|ui| {
-                    // if allow_install {
-                    //     ui.horizontal_centered(|ui| {
-                    //         if !addon.installed
-                    //             && ui.button(RichText::new("Install").heading()).clicked()
-                    //         {
-                    //             response.addon_id = addon.id;
-                    //             response.response_type = AddonResponseType::Install;
-                    //         } else if addon.installed && addon.is_upgradable() {
-                    //             // if self.is_updating_addon(addon.id) {
-                    //             // ui.centered_and_justified(|ui| {
-                    //             //     ui.add_enabled(
-                    //             //         false,
-                    //             //         egui::Button::new("Updating..."),
-                    //             //     );
-                    //             // });
-                    //             // } else if ui.button("Update").clicked() {
-                    //             if ui.button(RichText::new("Update").heading()).clicked() {
-                    //                 response.addon_id = addon.id;
-                    //                 response.response_type = AddonResponseType::Update;
-                    //             }
-                    //         }
-                    //     });
-                    // }
-                    // });
                 });
             });
         response
     }
 }
 
-// pub struct AddonRow<'a> {
-//     addon: &'a AddonShowDetails,
-// }
-// impl AddonRow {
-//     pub fn new(addon: &AddonShowDetails) -> Self {
-//         Self { addon }
-//     }
-//     pub fn ui(&self, row: &mut TableRow<'_, '_>) {
-//         let Self { addon } = self;
-//         row.col(|ui| {
-//             ui.label(addon.name.as_str());
-//         });
-//     }
-// }
-
 pub fn ui_show_star(ui: &mut egui::Ui) {
     ui.label(RichText::new("★").color(Color32::YELLOW))
         .on_hover_text("Popular! (More than 5000 downloads)");
-}
-
-pub fn ui_show_addon_item(ui: &mut egui::Ui, addon: &AddonShowDetails) -> Option<Response> {
-    // col1:
-    // addon_name, author
-    // category
-    let mut response = None;
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            response = Some(ui.selectable_label(false, addon.name.as_str()));
-            if addon
-                .download_total
-                .as_ref()
-                .unwrap()
-                .parse::<i32>()
-                .unwrap()
-                > 5000
-            {
-                ui_show_star(ui);
-            }
-        });
-        ui.label(RichText::new(format!("by: {}", addon.author_name.as_str())));
-        ui.label(RichText::new(addon.category.as_str()));
-    });
-    // col2:
-    // download total
-    // favorites
-    // version
-    ui.vertical(|ui| {
-        let default = String::new();
-        let installed_version = addon.installed_version.as_ref().unwrap_or(&default);
-        if addon.is_upgradable() {
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new(addon.version.as_str()).color(Color32::GREEN));
-                ui.label(installed_version);
-            });
-        } else {
-            if addon.download_total.is_some() {
-                // "⮋" downloads
-                ui.add(
-                    Label::new(format!(
-                        "⮋ {}",
-                        addon.download_total.as_ref().unwrap().as_str()
-                    ))
-                    .wrap(false),
-                );
-            }
-            // "♥" favorites
-            if addon.favorite_total.is_some() {
-                ui.add(
-                    Label::new(format!(
-                        "♥ {}",
-                        addon.favorite_total.as_ref().unwrap().as_str()
-                    ))
-                    .wrap(false),
-                );
-            }
-            // "🔃" version
-            ui.add(Label::new(format!("🔃 {}", addon.version)).wrap(false));
-        }
-    });
-    response
 }
 
 pub fn ui_show_bbtree(ui: &mut egui::Ui, tree: &BBTree) {
