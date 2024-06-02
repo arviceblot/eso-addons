@@ -6,25 +6,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = "1.0.164"
+serde = "1.0.203"
 serde_derive = "1.0"
-serde_json = "1.0.113"
+serde_json = "1.0.117"
 dirs = "5.0.1"
 regex = "1.10.3"
-scraper = "0.18.1"
+scraper = "0.19.0"
 tempfile = "3.8.0"
 requestty = "0.5"
 colored = "2"
 prettytable-rs = "^0.10"
 walkdir = "2"
-toml = "0.8.8"
+toml = "0.8.12"
 reqwest = { version = "0.11.20", default-features = false, features = [
     "gzip",
     "json",
     "rustls-tls",
 ] }
 tokio = { version = "1.29.1", features = ["full"] }
-snafu = { version = "0.8.0", features = ["backtrace"] }
+snafu = { version = "0.8.3", features = ["backtrace"] }
 zip = "0.6.6"
 sea-orm = { version = "^0", features = [
     "sqlx-sqlite",
@@ -33,7 +33,7 @@ sea-orm = { version = "^0", features = [
 ] }
 migration = { path = "../migration" }
 entity = { path = "../entity" }
-chrono = "0.4.33"
+chrono = "0.4.38"
 tracing = "0.1.40"
 lazy_async_promise = "0.5.0"
 bbcode-tagger = "0.2.0"

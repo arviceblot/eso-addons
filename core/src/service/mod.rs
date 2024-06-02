@@ -40,6 +40,7 @@ mod fs_util;
 pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
+const TTC_EU_URL: &str = "https://eu.tamrieltradecentre.com/download/PriceTable";
 
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
@@ -804,6 +805,9 @@ impl AddonService {
             info!("Updating TTC PriceTable");
             service
                 .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
+                .await?;
+            service
+                .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
                 .await?;
             Ok(())
         })
