@@ -67,10 +67,10 @@ impl ApiClient {
     }
 
     pub fn update_endpoints_from_config(&mut self, config: &Config) {
-        self.file_list_url = config.file_list.to_owned();
-        self.file_details_url = config.file_details.to_owned();
-        self.list_files_url = config.list_files.to_owned();
-        self.category_list_url = config.category_list.to_owned();
+        config.file_list.clone_into(&mut self.file_list_url);
+        config.file_details.clone_into(&mut self.file_details_url);
+        config.list_files.clone_into(&mut self.list_files_url);
+        config.category_list.clone_into(&mut self.category_list_url);
     }
 
     pub async fn get_file_list(&mut self) -> Result<Vec<FileListItem>> {

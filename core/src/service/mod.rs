@@ -324,10 +324,22 @@ impl AddonService {
             }
 
             info!("Saving config");
-            service.config.file_details = service.api.file_details_url.to_owned();
-            service.config.file_list = service.api.file_list_url.to_owned();
-            service.config.list_files = service.api.list_files_url.to_owned();
-            service.config.category_list = service.api.category_list_url.to_owned();
+            service
+                .api
+                .file_details_url
+                .clone_into(&mut service.config.file_details);
+            service
+                .api
+                .file_list_url
+                .clone_into(&mut service.config.file_list);
+            service
+                .api
+                .list_files_url
+                .clone_into(&mut service.config.list_files);
+            service
+                .api
+                .category_list_url
+                .clone_into(&mut service.config.category_list);
 
             service.config.save()?;
 

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Button, RichText, ScrollArea, Visuals};
-use egui_tracing::tracing::collector::EventCollector;
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
 use lazy_async_promise::ImmediateValuePromise;
@@ -25,17 +24,8 @@ pub struct Settings {
 
     restore_dialog: PromisedValue<Option<String>>,
     restore_process: Option<PromisedValue<()>>,
-
-    collector: EventCollector,
 }
 impl Settings {
-    pub fn new(collector: EventCollector) -> Self {
-        Self {
-            collector,
-            ..Default::default()
-        }
-    }
-
     fn poll(&mut self, service: &mut AddonService) -> AddonResponse {
         let mut response = AddonResponse::default();
 

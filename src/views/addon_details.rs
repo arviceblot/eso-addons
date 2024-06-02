@@ -35,7 +35,6 @@ pub struct Details {
     show_raw_text: bool,
     images: PromisedValue<Vec<AddonImageResult>>,
     selected_image: String,
-    markdown: String,
 }
 
 impl Details {
@@ -258,7 +257,7 @@ impl View for Details {
                     if self.selected_image == String::default() {
                         // set selected to first image
                         if let Some(img) = self.images.value.as_ref().unwrap().first() {
-                            self.selected_image = img.image.to_owned();
+                            img.image.clone_into(&mut self.selected_image);
                         }
                     }
                     egui::SidePanel::left("image_left")
@@ -273,7 +272,7 @@ impl View for Details {
                                         ))
                                         .clicked()
                                     {
-                                        self.selected_image = image.image.to_owned();
+                                        image.image.clone_into(&mut self.selected_image);
                                     }
                                 }
                             });

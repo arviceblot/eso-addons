@@ -1,6 +1,5 @@
 use dotenv::dotenv;
 use eframe::egui::{self, vec2, RichText, Visuals};
-use egui_tracing::tracing::collector::EventCollector;
 use eso_addons_core::config;
 use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use eso_addons_core::service::AddonService;
@@ -10,8 +9,6 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing::error;
 use tracing::log::info;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 use views::author::Author;
 
 mod views;
@@ -32,7 +29,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() -> Result<(), eframe::Error> {
     dotenv().ok();
 
-    let collector = egui_tracing::EventCollector::default();
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_test_writer()
@@ -60,7 +56,7 @@ async fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(EamApp::new(cc, service, collector))
+            Box::new(EamApp::new(cc, service))
         }),
     )
 }
@@ -95,11 +91,7 @@ struct EamApp {
 }
 
 impl EamApp {
-    fn new(
-        cc: &eframe::CreationContext<'_>,
-        service: AddonService,
-        collector: EventCollector,
-    ) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, service: AddonService) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
@@ -127,7 +119,7 @@ impl EamApp {
             view_stack: vec![ViewOpt::Root],
             installed_view: Installed::new(),
             search: Search::new(),
-            settings: Settings::new(collector),
+            settings: Settings::default(),
             service,
             details: Details::default(),
             onboard: Onboard::default(),
