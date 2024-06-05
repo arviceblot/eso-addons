@@ -25,7 +25,7 @@ reqwest = { version = "0.11.20", default-features = false, features = [
 ] }
 tokio = { version = "1.38.0", features = ["full"] }
 snafu = { version = "0.8.3", features = ["backtrace"] }
-zip = "0.6.6"
+zip = "1.1.4"
 sea-orm = { version = "^0", features = [
     "sqlx-sqlite",
     "runtime-tokio-rustls",
