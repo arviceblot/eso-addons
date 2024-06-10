@@ -17,7 +17,7 @@ requestty = "0.5"
 colored = "2"
 prettytable-rs = "^0.10"
 walkdir = "2"
-toml = "0.8.13"
+toml = "0.8.14"
 reqwest = { version = "0.12.4", default-features = false, features = [
     "gzip",
     "json",
