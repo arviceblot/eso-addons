@@ -1,6 +1,6 @@
 [package]
 name = "eso-addon-manager"
-version = "0.4.10"
+version = "0.4.11"
 authors = [
     "arviceblot <github@relay.arviceblot.com>",
     "Damian Czaja <trojan295@protonmail.com>",
@@ -8,6 +8,13 @@ authors = [
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
+
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Enable link-time optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations
+panic = 'abort'     # Abort on panic
+strip = true        # Strip symbols from binary*
 
 [workspace]
 members = [".", "core", "entity", "migration"]

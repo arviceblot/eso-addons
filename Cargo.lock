@@ -1942,7 +1942,7 @@ checksum = "281e452d3bad4005426416cdba5ccfd4f5c1280e10099e21db27f7c1c28347fc"
 
 [[package]]
 name = "eso-addon-manager"
-version = "0.4.10"
+version = "0.4.11"
 dependencies = [
  "bbcode-tagger",
  "dotenv",
