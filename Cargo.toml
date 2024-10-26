@@ -18,7 +18,6 @@ strip = true        # Strip symbols from binary*
 
 [workspace]
 members = [".", "core", "entity", "migration"]
-# members = [".", "cli", "core", "entity", "migration"]
 
 [[bin]]
 name = "eso-addon-manager"
