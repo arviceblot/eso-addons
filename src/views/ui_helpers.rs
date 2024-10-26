@@ -3,7 +3,7 @@ use std::fmt;
 use tracing::log::error;
 
 use eframe::{
-    egui::{self, vec2, Image, Label, Layout, RichText, TextFormat},
+    egui::{self, vec2, Image, Label, Layout, RichText, TextFormat, TextWrapMode},
     emath::Align,
     epaint::{text::LayoutJob, Color32, FontId, Stroke},
 };
@@ -284,7 +284,7 @@ impl<'a> AddonTable<'a> {
                                                 "⮋ {}",
                                                 addon.download_total.as_ref().unwrap().as_str()
                                             ))
-                                            .wrap(false),
+                                            .wrap_mode(TextWrapMode::Extend),
                                         );
                                     }
                                 });
@@ -299,7 +299,7 @@ impl<'a> AddonTable<'a> {
                                                 "♥ {}",
                                                 addon.favorite_total.as_ref().unwrap().as_str()
                                             ))
-                                            .wrap(false),
+                                            .wrap_mode(TextWrapMode::Extend),
                                         );
                                     }
                                 });
@@ -312,7 +312,7 @@ impl<'a> AddonTable<'a> {
                                             "🔃 {}",
                                             truncate_len(&addon.version, 17)
                                         ))
-                                        .wrap(false),
+                                        .wrap_mode(TextWrapMode::Extend),
                                     );
                                 });
                             });

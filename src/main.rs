@@ -43,7 +43,7 @@ async fn main() -> Result<(), eframe::Error> {
             .with_inner_size([960.0, 600.0])
             .with_min_inner_size([640.0, 400.0])
             .with_fullscreen(hostname == "steamdeck"), // attempt steamdeck resolution fix in game mode
-        follow_system_theme: true, // as of 2024-02-19, does not work on linux
+        // follow_system_theme: true, // as of 2024-02-19, does not work on linux. TODO: figure out if we need to move this
         ..Default::default()
     };
 
@@ -56,13 +56,13 @@ async fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(EamApp::new(cc, service))
+            Ok(Box::new(EamApp::new(cc, service)))
         }),
     )
 }
 
 struct EamApp {
-    /// The currect active view
+    /// The correct active view
     view: ViewOpt,
     /// Previous view, stored really only to compare against view change
     prev_view: ViewOpt,
@@ -99,7 +99,10 @@ impl EamApp {
 
         // force repaint every 1 second for installs/updates
         cc.egui_ctx.request_repaint_after(Duration::new(1, 0));
-
+        
+        // force ppi to 1 for correct steamdeck size
+        cc.egui_ctx.set_pixels_per_point(1.0);
+        
         // set theme based on save config
         if service.config.style != config::Style::System {
             let style = match service.config.style {

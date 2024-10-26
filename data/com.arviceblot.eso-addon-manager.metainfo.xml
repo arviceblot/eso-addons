@@ -50,6 +50,19 @@
   </screenshots>
 
   <releases>
+    <release version="0.4.11" date="2024-10-25">
+      <description>
+        <p>
+          Version 0.4.11 includes minor changes for Steam Deck and addon details:
+        </p>
+        <ul>
+          <li>Change: Remove bbcode parsing from UI. It will remain disabled until there is a proper solution for rendering bbcode formatted text</li>
+          <li>Change: Update dependencies</li>
+          <li>Change: Reduce app size</li>
+          <li>Fix: Pixels-per-point too large on Steam Deck</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4.10" date="2024-06-02">
       <description>
         <p>
