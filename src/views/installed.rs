@@ -1,6 +1,6 @@
 use tracing::log::info;
 
-use eframe::egui::{self, Layout, RichText};
+use eframe::egui::{self, Layout, RichText, TextWrapMode};
 use eso_addons_core::service::{result::AddonShowDetails, AddonService};
 use strum::IntoEnumIterator;
 
@@ -172,10 +172,10 @@ impl View for Installed {
                 ui.add_space(5.0);
 
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_source("sort")
+                    egui::ComboBox::from_id_salt("sort")
                         .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
                         .show_ui(ui, |ui| {
-                            ui.style_mut().wrap = Some(false);
+                            ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                             ui.set_min_width(60.0);
                             for sort in Sort::iter() {
                                 ui.selectable_value(&mut self.sort, sort, sort.to_string());
