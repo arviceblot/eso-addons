@@ -402,7 +402,7 @@ fn ui_show_bbnode(ui: &mut egui::Ui, tree: &BBTree, i: i32, parent_nodes: &mut V
         BBTag::ListUnordered => {
             children_handled = true;
             ui.vertical(|ui| {
-                ui.style_mut().wrap = Some(true);
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Wrap);
                 if let Some(title) = &node.value {
                     if !title.is_empty() {
                         ui.label(node.text.as_str());
