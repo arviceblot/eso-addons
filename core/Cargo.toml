@@ -34,7 +34,7 @@ sea-orm = { version = "1.1.10", features = [
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 tracing = "0.1.41"
-chrono = "0.4.39"
+chrono = "0.4.40"
 lazy_async_promise = "0.6.0"
 bbcode-tagger = "0.2.0"
 md-5 = "0.10.6"
