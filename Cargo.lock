@@ -2308,7 +2308,6 @@ version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d6401deb83407ab3da39eba7e33987a73c3df0c82b4bb5813ee871c19c41d48"
 dependencies = [
- "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -5175,9 +5174,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "1.1.2"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "653da4aba23cb596bf03d6f5faad274c74852c8ef014171a4fb9518032377105"
+checksum = "0f3d39b35e43a05998228f6c4abaa50b7fcaf001dea94fbdc04188a8be82a016"
 dependencies = [
  "chrono",
  "clap",
@@ -5206,14 +5205,13 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "1.1.2"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03b271c0dd7729623d8debb5f017806f066902e3c287f08dc5ff312c3277dc6f"
+checksum = "4ae8b2af58a56c8f850e8d8a18a462255eb36a571f085f3405f6b83d9cf23e0f"
 dependencies = [
  "async-trait",
  "clap",
  "dotenvy",
- "futures",
  "sea-orm",
  "sea-orm-cli",
  "sea-schema",
