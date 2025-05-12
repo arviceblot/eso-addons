@@ -23,7 +23,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
-tokio = { version = "1.44.2", features = ["full"] }
+tokio = { version = "1.45.0", features = ["full"] }
 snafu = { version = "0.8.5", features = ["backtrace"] }
 zip = "2.3.0"
 sea-orm = { version = "1.1.10", features = [
