@@ -1,141 +1,153 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.arviceblot.eso-addon-manager</id>
+    <id>com.arviceblot.eso-addon-manager</id>
 
-  <name>ESO AddOn Manager</name>
-  <summary>Manage addons for The Elder Scrolls Online</summary>
-  <developer id="arviceblot">
-    <name>
-      arviceblot
-    </name>
-  </developer>
+    <name>ESO AddOn Manager</name>
+    <summary>Manage addons for The Elder Scrolls Online</summary>
+    <developer id="arviceblot">
+        <name>
+            arviceblot
+        </name>
+    </developer>
 
-  <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+    <metadata_license>CC0-1.0</metadata_license>
+    <project_license>MIT</project_license>
 
-  <content_rating type="oars-1.1" />
+    <content_rating type="oars-1.1" />
 
-  <description>
-    <p>
-      Update and install addons for ESO. Primarily built on Linux for Linux.
-    </p>
-    <ul>
-      <li>Install, remove, and search addons from esoui.com</li>
-      <li>Cross-platform support for Linux, macOS, and Windows</li>
-      <li>Specific support for ESO on the Steam Deck through flatpak</li>
-      <li>Options to auto update Tamriel Trade Centre prices and HarvestMap data</li>
-      <li>Import managed addons from Minion</li>
-      <li>Identify and install missing dependencies</li>
-      <li>Light and dark modes</li>
-    </ul>
-  </description>
-
-  <url type="homepage">https://github.com/arviceblot/eso-addons</url>
-  <url type="bugtracker">https://github.com/arviceblot/eso-addons/issues</url>
-
-  <launchable type="desktop-id">com.arviceblot.eso-addon-manager.desktop</launchable>
-  <screenshots>
-    <screenshot type="default">
-      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main.png</image>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main-dark.png</image>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/browse.png</image>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/settings.png</image>
-    </screenshot>
-  </screenshots>
-
-  <releases>
-    <release version="0.4.11" date="2024-10-25">
-      <description>
+    <description>
         <p>
-          Version 0.4.11 includes minor changes for Steam Deck and addon details:
+            Update and install addons for ESO. Primarily built on Linux for Linux.
         </p>
         <ul>
-          <li>Change: Remove bbcode parsing from UI. It will remain disabled until there is a proper solution for rendering bbcode formatted text</li>
-          <li>Change: Update dependencies</li>
-          <li>Change: Reduce app size</li>
-          <li>Fix: Pixels-per-point too large on Steam Deck</li>
+            <li>Install, remove, and search addons from esoui.com</li>
+            <li>Cross-platform support for Linux, macOS, and Windows</li>
+            <li>Specific support for ESO on the Steam Deck through flatpak</li>
+            <li>Options to auto update Tamriel Trade Centre prices and HarvestMap data</li>
+            <li>Import managed addons from Minion</li>
+            <li>Identify and install missing dependencies</li>
+            <li>Light and dark modes</li>
         </ul>
-      </description>
-    </release>
-    <release version="0.4.10" date="2024-06-02">
-      <description>
-        <p>
-          Version 0.4.10 includes backup/restore feature, minor fixes:
-        </p>
-        <ul>
-          <li>New: Add backup/restore functionality, making addon lists more portable</li>
-          <li>New: Add indicator for main process tasks</li>
-          <li>New: Add EU support for TTC downloads (thanks Wedmer!)</li>
-          <li>Change: Update dependencies</li>
-          <li>Change: Set minimum window size</li>
-          <li>Change: Fullscreen mode on steamdeck to attempt resolution fix</li>
-          <li>Remove: No longer used dependencies</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.4.9" date="2024-02-20">
-      <description>
-        <p>
-          Version 0.4.9 brings images, bug fixes, and responsive layout improvements:
-        </p>
-        <ul>
-          <li>New: Add screenshots view to details page.</li>
-          <li>New: Add category icons to addon lists.</li>
-          <li>New: Add file details view to details page.</li>
-          <li>New: Add light and dark mode toggles.</li>
-          <li>Change: Replace egui_file with rfd for native file dialogs.</li>
-          <li>Fix: Issue with minion import button not reporting progress correctly.</li>
-          <li>Fix: Addons lists not resizing.</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.4.8" date="2024-02-15">
-      <description>
-        <p>
-          Version 0.4.8 is here with a major UI update and the following changes:
-        </p>
-        <ul>
-          <li>New: Major internal changes to view handling and layout.</li>
-          <li>New: Game version support in addon detail view.</li>
-          <li>New: Author view. From any addon detail page, select the author name to see all other addons by them.</li>
-          <li>Change: AddOn lists now display all addons without truncating.</li>
-          <li>Change: Consolidated category and search pages for installing new addons.</li>
-          <li>Change: Missing dependencies are now reported on any missing addons.</li>
-          <li>Change: Missing dependencies view does not hog main window or prevent addon install.</li>
-          <li>Fix: Import from minion no longer results in endless spinner.</li>
-          <li>Fix: All relevant views now update on addon install status changes.</li>
-          <li>Fix: Onboarding now diplays on new installs.</li>
-          <li>Fix: Changing addon directory in settings should default to a valid directory in file dialog.</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.4.7" date="2024-01-17">
-      <description>
-        <p>
-          This release brings the following changes and updates:
-        </p>
-        <ul>
-          <li>Update layout so tab bar is always visible.</li>
-          <li>Add raw text view option for addon descriptions and changelogs.</li>
-          <li>Change auto-update functionality to update all button.</li>
-          <li>Add install and update addon funcitonality to addon detail view.</li>
-        </ul>
-      </description>
-    </release>
-  </releases>
-  <categories>
-    <category>Utility</category>
-  </categories>
-  <keywords>
-    <keyword>addons</keyword>
-    <keyword>eso</keyword>
-    <keyword>game</keyword>
-    <keyword>mods</keyword>
-  </keywords>
+    </description>
+
+    <url type="homepage">https://github.com/arviceblot/eso-addons</url>
+    <url type="bugtracker">https://github.com/arviceblot/eso-addons/issues</url>
+
+    <launchable type="desktop-id">com.arviceblot.eso-addon-manager.desktop</launchable>
+    <screenshots>
+        <screenshot type="default">
+            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main.png</image>
+        </screenshot>
+        <screenshot>
+            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main-dark.png</image>
+        </screenshot>
+        <screenshot>
+            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/browse.png</image>
+        </screenshot>
+        <screenshot>
+            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/settings.png</image>
+        </screenshot>
+    </screenshots>
+
+    <releases>
+        <release version="0.4.12" date="2025-XX-XX">
+            <description>
+                <p>
+                    Version 0.4.12 includes minor bug fixes:
+                </p>
+                <ul>
+                    <li>Change: Update dependencies</li>
+                    <li>Change: Update flatpak runtime to 24.08</li>
+                    <li>Fix: Compile-time warnings about deprecated functionality</li>
+                </ul>
+            </description>
+        </release>
+        <release version="0.4.11" date="2024-10-25">
+            <description>
+                <p>
+                    Version 0.4.11 includes minor changes for Steam Deck and addon details:
+                </p>
+                <ul>
+                    <li>Change: Remove bbcode parsing from UI. It will remain disabled until there is a proper solution for rendering bbcode formatted text</li>
+                    <li>Change: Update dependencies</li>
+                    <li>Change: Reduce app size</li>
+                    <li>Fix: Pixels-per-point too large on Steam Deck</li>
+                </ul>
+            </description>
+        </release>
+        <release version="0.4.10" date="2024-06-02">
+            <description>
+                <p>
+                    Version 0.4.10 includes backup/restore feature, minor fixes:
+                </p>
+                <ul>
+                    <li>New: Add backup/restore functionality, making addon lists more portable</li>
+                    <li>New: Add indicator for main process tasks</li>
+                    <li>New: Add EU support for TTC downloads (thanks Wedmer!)</li>
+                    <li>Change: Update dependencies</li>
+                    <li>Change: Set minimum window size</li>
+                    <li>Change: Fullscreen mode on steamdeck to attempt resolution fix</li>
+                    <li>Remove: No longer used dependencies</li>
+                </ul>
+            </description>
+        </release>
+        <release version="0.4.9" date="2024-02-20">
+            <description>
+                <p>
+                    Version 0.4.9 brings images, bug fixes, and responsive layout improvements:
+                </p>
+                <ul>
+                    <li>New: Add screenshots view to details page.</li>
+                    <li>New: Add category icons to addon lists.</li>
+                    <li>New: Add file details view to details page.</li>
+                    <li>New: Add light and dark mode toggles.</li>
+                    <li>Change: Replace egui_file with rfd for native file dialogs.</li>
+                    <li>Fix: Issue with minion import button not reporting progress correctly.</li>
+                    <li>Fix: Addons lists not resizing.</li>
+                </ul>
+            </description>
+        </release>
+        <release version="0.4.8" date="2024-02-15">
+            <description>
+                <p>
+                    Version 0.4.8 is here with a major UI update and the following changes:
+                </p>
+                <ul>
+                    <li>New: Major internal changes to view handling and layout.</li>
+                    <li>New: Game version support in addon detail view.</li>
+                    <li>New: Author view. From any addon detail page, select the author name to see all other addons by them.</li>
+                    <li>Change: AddOn lists now display all addons without truncating.</li>
+                    <li>Change: Consolidated category and search pages for installing new addons.</li>
+                    <li>Change: Missing dependencies are now reported on any missing addons.</li>
+                    <li>Change: Missing dependencies view does not hog main window or prevent addon install.</li>
+                    <li>Fix: Import from minion no longer results in endless spinner.</li>
+                    <li>Fix: All relevant views now update on addon install status changes.</li>
+                    <li>Fix: Onboarding now diplays on new installs.</li>
+                    <li>Fix: Changing addon directory in settings should default to a valid directory in file dialog.</li>
+                </ul>
+            </description>
+        </release>
+        <release version="0.4.7" date="2024-01-17">
+            <description>
+                <p>
+                    This release brings the following changes and updates:
+                </p>
+                <ul>
+                    <li>Update layout so tab bar is always visible.</li>
+                    <li>Add raw text view option for addon descriptions and changelogs.</li>
+                    <li>Change auto-update functionality to update all button.</li>
+                    <li>Add install and update addon funcitonality to addon detail view.</li>
+                </ul>
+            </description>
+        </release>
+    </releases>
+    <categories>
+        <category>Utility</category>
+    </categories>
+    <keywords>
+        <keyword>addons</keyword>
+        <keyword>eso</keyword>
+        <keyword>game</keyword>
+        <keyword>mods</keyword>
+    </keywords>
 </component>

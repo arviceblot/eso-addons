@@ -11,6 +11,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 - Cross-platform support for Linux, macOS, and Windows
 - Specific support for ESO on the Steam Deck through Flathub
 - Options to auto update Tamriel Trade Centre prices and HarvestMap data
+- Light and dark UI themes
 - No Java!
 - Import managed addons from Minion
 - Suggest installing addons for any missing depenencies
@@ -69,10 +70,6 @@ cargo run eso-addon-manager
 ### AppImage
 
 AppImageLauncher has the option to automatically install updates, this app has been designed to take advantage of that using GitHub release information.
-
-## TODO
-
-- Add screenshot support for addons
 
 ## Legacy
 
