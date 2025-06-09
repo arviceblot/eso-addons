@@ -103,7 +103,7 @@ pub fn fs_read_addon(path: &Path) -> Result<Addon> {
     let re = Regex::new(r"## (.*): (.*)").unwrap();
 
     let reader = BufReader::new(addon_file);
-    for line in reader.lines().flatten() {
+    for line in reader.lines().map_while(Result::ok) {
         if line.starts_with("## DependsOn:") {
             let depends_on = match re.captures(&line) {
                 Some(ref captures) => captures[2]

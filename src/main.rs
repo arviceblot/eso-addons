@@ -41,7 +41,7 @@ async fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([960.0, 600.0])
-            .with_min_inner_size([640.0, 400.0])
+            .with_min_inner_size([800.0, 500.0])
             .with_fullscreen(hostname == "steamdeck"), // attempt steamdeck resolution fix in game mode
         // follow_system_theme: true, // as of 2024-02-19, does not work on linux. TODO: figure out if we need to move this
         ..Default::default()
