@@ -50,10 +50,10 @@
     </screenshots>
 
     <releases>
-        <release version="0.4.12" date="2025-XX-XX">
+        <release version="0.4.12" date="2025-06-09">
             <description>
                 <p>
-                    Version 0.4.12 includes minor bug fixes:
+                    Version 0.4.12 includes minor security and bug fixes:
                 </p>
                 <ul>
                     <li>Change: Update dependencies</li>
