@@ -12,7 +12,7 @@ use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use strum_macros::EnumIter;
 
 #[derive(Debug, PartialEq, Clone, Copy, EnumIter)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub enum Sort {
     Name,
     Updated,
@@ -41,7 +41,7 @@ impl Default for Sort {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(serde::Deserialize, serde::Serialize)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewOpt {
     /// Not really a reachable view, but a base
@@ -205,7 +205,7 @@ impl<'a> AddonTable<'a> {
                             ui.add(
                                 Image::new(icon)
                                     .fit_to_exact_size(vec2(45.0, 45.0))
-                                    .rounding(5.0),
+                                    .corner_radius(5.0),
                             );
                         }
                     });
