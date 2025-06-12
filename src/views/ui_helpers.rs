@@ -83,7 +83,7 @@ impl<T: Send + Clone + Default> PromisedValue<T> {
                 self.promise = None;
             }
             ImmediateValueState::Error(e) => {
-                error!("{}", format!("Error fetching data: {}", **e));
+                error!("Error fetching data: {}", **e);
                 self.promise = None;
             }
             _ => {}
