@@ -76,22 +76,13 @@ impl Search {
         self.categories.get(&category_id).unwrap().title.to_owned()
     }
 
-    #[deprecated(since = "0.4.8", note = "please use `reset()` instead")]
-    pub fn handle_search(&mut self, service: &mut AddonService) {
-        let search_val = self.search.trim().to_lowercase();
-        if search_val.is_empty() || self.results.is_polling() {
-            return;
-        }
-        info!("Searching for: {}", search_val);
-        self.results.set(service.search(search_val));
-    }
-
     fn handle_sort(&mut self) {
         if self.prev_sort != self.sort {
             self.prev_sort = self.sort;
             self.sort_addons();
         }
     }
+
     fn sort_addons(&mut self) {
         if self.category_addons.value.as_ref().is_some() {
             self.displayed_addons = self.category_addons.value.as_ref().unwrap().to_vec();

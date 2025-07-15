@@ -27,9 +27,6 @@ impl MissingDeps {
             .all(|x| x.ignore || x.satisfied_by.is_some())
     }
 
-    pub fn has_missing(&self) -> bool {
-        !self.missing_deps.is_empty()
-    }
     pub fn set_deps(&mut self, deps: Vec<AddonDepOption>) {
         for dep in deps.iter() {
             let dep_view = match self.missing_deps.entry(dep.missing_dir.clone()) {
