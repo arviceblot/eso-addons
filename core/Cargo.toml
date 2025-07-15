@@ -1,6 +1,6 @@
 [package]
 name = "eso-addons-core"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -38,3 +38,4 @@ chrono = "0.4.41"
 lazy_async_promise = "0.6.0"
 bbcode-tagger = "0.2.0"
 md-5 = "0.10.6"
+version-compare = "0.2.0"

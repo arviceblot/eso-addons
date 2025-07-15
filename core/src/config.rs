@@ -2,6 +2,7 @@ use crate::error::{self, Result};
 use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
+use version_compare::Version;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 
@@ -16,6 +17,8 @@ const STEAMDECK_DEFAULT_ADDON_DIR: &str = ".local/share/Steam/steamapps/compatda
 const WINDOWS_DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
 const LINUX_DEFAULT_ADDON_DIR: &str =
     "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+    
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct AddonEntry {
@@ -52,6 +55,8 @@ impl Default for Style {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
+    #[serde(default = "default_version")]
+    pub version: String,
     #[serde(default = "default_addon_dir")]
     pub addon_dir: PathBuf,
     #[serde(default = "default_str")]
@@ -64,7 +69,7 @@ pub struct Config {
     pub category_list: String,
     #[serde(default)]
     pub update_ttc_pricetable: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub update_on_launch: bool,
     #[serde(default = "default_true")]
     pub onboard: bool,
@@ -83,7 +88,7 @@ impl Config {
         }
         let config_filepath = Self::default_config_path();
         // create config file if not exists, with defaults
-        let config: Config = match config_filepath.exists() {
+        let mut config: Config = match config_filepath.exists() {
             true => {
                 let config_data = fs::read_to_string(&config_filepath)
                     .context(error::ConfigLoadSnafu {
@@ -123,6 +128,18 @@ impl Config {
                 }
             }
         };
+        
+        // check conf version upgrades
+        let conf_version = Version::from(&config.version).unwrap();
+        if conf_version < Version::from("0.1.2").unwrap() {
+            // set auto update true as default when updating conf version, previous default was false
+            config.update_on_launch = true;
+        }
+        
+        // update conf version
+        if conf_version < Version::from(VERSION).unwrap() {
+            config.version = VERSION.to_string();
+        }
 
         // write defaults for immediate use
         config.save().unwrap();
@@ -152,6 +169,8 @@ fn default_str() -> String {
 fn default_true() -> bool {
     true
 }
+
+fn default_version() -> String { "0.1.1".to_string() }
 
 #[cfg(target_os = "linux")]
 fn default_addon_dir() -> PathBuf {

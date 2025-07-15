@@ -51,12 +51,18 @@ pub struct AddonService {
 impl AddonService {
     pub async fn new() -> Self {
         // setup config
-        let config = Config::load();
+        let mut config = Config::load();
 
         // init api/download client
         let mut client = ApiClient::default();
         if config.file_list.is_empty() {
             client.update_endpoints().await.unwrap();
+            info!("Saving config");
+            client.file_details_url.clone_into(&mut config.file_details);
+            client.file_list_url.clone_into(&mut config.file_list);
+            client.list_files_url.clone_into(&mut config.list_files);
+            client.category_list_url.clone_into(&mut config.category_list);
+            config.save().unwrap();
         } else {
             client.update_endpoints_from_config(&config);
         }
@@ -323,27 +329,6 @@ impl AddonService {
             if upgrade_all {
                 result = service.upgrade().await.unwrap();
             }
-
-            info!("Saving config");
-            service
-                .api
-                .file_details_url
-                .clone_into(&mut service.config.file_details);
-            service
-                .api
-                .file_list_url
-                .clone_into(&mut service.config.file_list);
-            service
-                .api
-                .list_files_url
-                .clone_into(&mut service.config.list_files);
-            service
-                .api
-                .category_list_url
-                .clone_into(&mut service.config.category_list);
-
-            service.config.save()?;
-
             Ok(result)
         })
     }
