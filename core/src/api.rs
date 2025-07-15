@@ -89,6 +89,7 @@ impl ApiClient {
     }
 
     pub async fn download_file(&self, url: &str) -> Result<Response> {
+        info!("Downloading: {url}");
         let response = self
             .client
             .get(url)

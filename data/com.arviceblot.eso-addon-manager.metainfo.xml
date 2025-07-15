@@ -53,10 +53,12 @@
         <release version="0.4.13" date="XXXX-XX-XX">
             <description>
                 <p>
-                    Version 0.4.13 includes minor security and bug fixes:
+                    Version 0.4.13 includes new settings options and minor fixes:
                 </p>
                 <ul>
                     <li>New: Add option to check for addon updates on app launch</li>
+                    <li>New: Add TamrielTradeCentre region selection (instead of always downloading NA and EU)</li>
+                    <li>New: Add individual indicators for long-running tasks</li>
                 </ul>
             </description>
         </release>

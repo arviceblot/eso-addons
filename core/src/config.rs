@@ -20,6 +20,18 @@ const LINUX_DEFAULT_ADDON_DIR: &str =
     
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum TTCRegion {
+    NA,
+    EU,
+    ALL
+}
+impl Default for TTCRegion {
+    fn default() -> Self {
+        Self::NA // sorry, EU!
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct AddonEntry {
     pub name: String,
@@ -77,6 +89,8 @@ pub struct Config {
     pub update_hm_data: bool,
     #[serde(default)]
     pub style: Style,
+    #[serde(default)]
+    pub ttc_region: TTCRegion,
 }
 impl Config {
     pub fn load() -> Config {

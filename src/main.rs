@@ -3,7 +3,6 @@ use eframe::egui::{self, vec2, RichText, Visuals};
 use eso_addons_core::config;
 use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use eso_addons_core::service::AddonService;
-use itertools::any;
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -142,6 +141,15 @@ impl EamApp {
             // check for update on init
             app.check_update();
         } else {
+            // check update TTC PriceTable
+            if app.service.config.update_ttc_pricetable {
+                app.ttc_pricetable
+                    .set(app.service.update_ttc_pricetable());
+            }
+            // check HarvestMap data
+            if app.service.config.update_hm_data {
+                app.hm_data = Some(app.service.update_hm_data());
+            }
             app.get_installed_addons();
             app.check_missing_deps();
         }
@@ -422,15 +430,36 @@ impl eframe::App for EamApp {
                 });
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     // show active progress items
-                    if self.update.is_polling()
-                        || self.ttc_pricetable.is_polling()
-                        || self.hm_data.is_some()
-                        || any(self.install_one.values(), |x| x.is_polling())
-                        || any(self.update_one.values(), |x| x.is_polling())
-                    {
+                    if self.update.is_polling() {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label("Updating");
+                            ui.label("Checking for updates");
+                        });
+                    }
+                    if self.ttc_pricetable.is_polling() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Updating TTC PriceTable");
+                        });
+                    }
+                    if self.hm_data.is_some() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Updating HarvestMap data");
+                        });
+                    }
+                    let installing_count = self.install_one.values().filter(|x| x.is_polling()).count();
+                    if installing_count > 0 {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(format!("Installing {} addons", installing_count));
+                        });
+                    }
+                    let updating_count = self.update_one.values().filter(|x| x.is_polling()).count();
+                    if updating_count > 0 {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(format!("Updating {} addons", updating_count));
                         });
                     }
                 });

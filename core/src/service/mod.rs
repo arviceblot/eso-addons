@@ -7,7 +7,7 @@ use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
-use crate::config::{self, Config};
+use crate::config::{self, Config, TTCRegion};
 use crate::error::{self, AddonDownloadHashSnafu, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
@@ -788,12 +788,16 @@ impl AddonService {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            service
-                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
-                .await?;
-            service
-                .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
-                .await?;
+            if service.config.ttc_region == TTCRegion::NA || service.config.ttc_region == TTCRegion::ALL {
+                service
+                    .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
+                    .await?;
+            }
+            if service.config.ttc_region == TTCRegion::EU || service.config.ttc_region == TTCRegion::ALL {
+                service
+                    .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
+                    .await?;
+            }
             Ok(())
         })
     }
