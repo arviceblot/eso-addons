@@ -309,7 +309,6 @@ impl View for Settings {
             //                 class == egui::ViewportClass::Immediate,
             //                 "This egui backend doesn't support multiple viewports"
             //             );
-    
             //             egui::CentralPanel::default().show(ctx, |ui| {
             //                 ui.add(egui_tracing::Logs::new(self.collector.clone()))
             //             });

@@ -61,7 +61,9 @@ impl AddonService {
             client.file_details_url.clone_into(&mut config.file_details);
             client.file_list_url.clone_into(&mut config.file_list);
             client.list_files_url.clone_into(&mut config.list_files);
-            client.category_list_url.clone_into(&mut config.category_list);
+            client
+                .category_list_url
+                .clone_into(&mut config.category_list);
             config.save().unwrap();
         } else {
             client.update_endpoints_from_config(&config);
@@ -331,35 +333,6 @@ impl AddonService {
             }
             Ok(result)
         })
-    }
-
-    async fn get_missing_addon_detail_ids(&self) -> Result<Vec<i32>> {
-        let mut results = vec![];
-        info!("Getting addons with missing or outdated details");
-        let addons = DbAddon::Entity::find()
-            .left_join(AddonDetail::Entity)
-            .filter(
-                Condition::any()
-                    .add(AddonDetail::Column::Version.is_null())
-                    .add(
-                        Expr::col((DbAddon::Entity, DbAddon::Column::Version)).ne(Expr::col((
-                            AddonDetail::Entity,
-                            AddonDetail::Column::Version,
-                        ))),
-                    )
-                    .add(DbAddon::Column::Md5.is_null())
-                    .add(DbAddon::Column::FileName.is_null())
-                    .add(DbAddon::Column::Download.is_null())
-                    .to_owned(),
-            )
-            .all(&self.db)
-            .await
-            .context(error::DbPutSnafu)?;
-        if addons.is_empty() {
-            return Ok(results);
-        }
-        results = addons.iter().map(|x| x.id).collect();
-        Ok(results)
     }
 
     async fn p_update_addon_details(&self, id: i32) -> Result<()> {
@@ -788,12 +761,16 @@ impl AddonService {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            if service.config.ttc_region == TTCRegion::NA || service.config.ttc_region == TTCRegion::ALL {
+            if service.config.ttc_region == TTCRegion::NA
+                || service.config.ttc_region == TTCRegion::ALL
+            {
                 service
                     .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
                     .await?;
             }
-            if service.config.ttc_region == TTCRegion::EU || service.config.ttc_region == TTCRegion::ALL {
+            if service.config.ttc_region == TTCRegion::EU
+                || service.config.ttc_region == TTCRegion::ALL
+            {
                 service
                     .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
                     .await?;

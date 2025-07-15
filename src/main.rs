@@ -5,6 +5,7 @@ use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateR
 use eso_addons_core::service::AddonService;
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::error;
 use tracing::log::info;
@@ -37,7 +38,9 @@ async fn main() -> Result<(), eframe::Error> {
     //     .init();
 
     let hostname = hostname::get().unwrap();
-    let options = eframe::NativeOptions {
+    let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../data/icon.png")[..])
+        .expect("Failed to load icon");
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([960.0, 600.0])
             .with_min_inner_size([800.0, 500.0])
@@ -45,6 +48,7 @@ async fn main() -> Result<(), eframe::Error> {
         // follow_system_theme: true, // as of 2024-02-19, does not work on linux. TODO: figure out if we need to move this
         ..Default::default()
     };
+    options.viewport.icon = Some(Arc::new(icon));
 
     // create service outside app
     let service = AddonService::new().await;
@@ -98,10 +102,10 @@ impl EamApp {
 
         // force repaint every 1 second for installs/updates
         cc.egui_ctx.request_repaint_after(Duration::new(1, 0));
-        
+
         // force ppi to 1 for correct steamdeck size
         cc.egui_ctx.set_pixels_per_point(1.0);
-        
+
         // set theme based on save config
         if service.config.style != config::Style::System {
             let style = match service.config.style {
@@ -111,6 +115,8 @@ impl EamApp {
             };
             cc.egui_ctx.set_style(egui::Style {
                 visuals: style,
+                // how URL on hyperlink hover
+                url_in_tooltip: true,
                 ..egui::Style::default()
             });
         }
@@ -143,8 +149,7 @@ impl EamApp {
         } else {
             // check update TTC PriceTable
             if app.service.config.update_ttc_pricetable {
-                app.ttc_pricetable
-                    .set(app.service.update_ttc_pricetable());
+                app.ttc_pricetable.set(app.service.update_ttc_pricetable());
             }
             // check HarvestMap data
             if app.service.config.update_hm_data {
@@ -448,14 +453,16 @@ impl eframe::App for EamApp {
                             ui.label("Updating HarvestMap data");
                         });
                     }
-                    let installing_count = self.install_one.values().filter(|x| x.is_polling()).count();
+                    let installing_count =
+                        self.install_one.values().filter(|x| x.is_polling()).count();
                     if installing_count > 0 {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label(format!("Installing {} addons", installing_count));
                         });
                     }
-                    let updating_count = self.update_one.values().filter(|x| x.is_polling()).count();
+                    let updating_count =
+                        self.update_one.values().filter(|x| x.is_polling()).count();
                     if updating_count > 0 {
                         ui.horizontal(|ui| {
                             ui.spinner();

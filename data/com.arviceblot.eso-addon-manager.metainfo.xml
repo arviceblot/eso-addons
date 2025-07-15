@@ -22,11 +22,11 @@
         <ul>
             <li>Install, remove, and search addons from esoui.com</li>
             <li>Cross-platform support for Linux, macOS, and Windows</li>
-            <li>Specific support for ESO on the Steam Deck through flatpak</li>
+            <li>Specific support for ESO on the Steam Deck through Flathub</li>
             <li>Options to auto update Tamriel Trade Centre prices and HarvestMap data</li>
+            <li>Light and dark UI themes</li>
             <li>Import managed addons from Minion</li>
             <li>Identify and install missing dependencies</li>
-            <li>Light and dark modes</li>
         </ul>
     </description>
 
@@ -37,15 +37,22 @@
     <screenshots>
         <screenshot type="default">
             <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main.png</image>
+            <caption>Main view showing installed addons</caption>
         </screenshot>
         <screenshot>
             <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main-dark.png</image>
         </screenshot>
         <screenshot>
             <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/browse.png</image>
+            <caption>Search and browse installable addons</caption>
+        </screenshot>
+        <screenshot>
+            <image></image>
+            <caption>Browse addon details and images</caption>
         </screenshot>
         <screenshot>
             <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/settings.png</image>
+            <caption>Application settings and details</caption>
         </screenshot>
     </screenshots>
 
@@ -53,12 +60,16 @@
         <release version="0.4.13" date="XXXX-XX-XX">
             <description>
                 <p>
-                    Version 0.4.13 includes new settings options and minor fixes:
+                    Version 0.4.13 includes a new addon list view and settings options:
                 </p>
                 <ul>
                     <li>New: Add option to check for addon updates on app launch</li>
                     <li>New: Add TamrielTradeCentre region selection (instead of always downloading NA and EU)</li>
                     <li>New: Add individual indicators for long-running tasks</li>
+                    <li>New: URLs are now visible on hyperlink hover</li>
+                    <li>New: Add application icon to native window titlebar (macOS, Wayland not supported yet)</li>
+                    <li>Change: Addon list is more compact</li>
+                    <li>Fix: Addon action buttons won't float away on resize</li>
                 </ul>
             </description>
         </release>
@@ -155,6 +166,7 @@
     </releases>
     <categories>
         <category>Utility</category>
+        <category>GameTool</category>
     </categories>
     <keywords>
         <keyword>addons</keyword>

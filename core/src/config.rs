@@ -2,9 +2,9 @@ use crate::error::{self, Result};
 use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
-use version_compare::Version;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
+use version_compare::Version;
 
 use tracing::log::info;
 
@@ -17,14 +17,14 @@ const STEAMDECK_DEFAULT_ADDON_DIR: &str = ".local/share/Steam/steamapps/compatda
 const WINDOWS_DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
 const LINUX_DEFAULT_ADDON_DIR: &str =
     "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
-    
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TTCRegion {
     NA,
     EU,
-    ALL
+    ALL,
 }
 impl Default for TTCRegion {
     fn default() -> Self {
@@ -142,14 +142,14 @@ impl Config {
                 }
             }
         };
-        
+
         // check conf version upgrades
         let conf_version = Version::from(&config.version).unwrap();
         if conf_version < Version::from("0.1.2").unwrap() {
             // set auto update true as default when updating conf version, previous default was false
             config.update_on_launch = true;
         }
-        
+
         // update conf version
         if conf_version < Version::from(VERSION).unwrap() {
             config.version = VERSION.to_string();
@@ -184,7 +184,9 @@ fn default_true() -> bool {
     true
 }
 
-fn default_version() -> String { "0.1.1".to_string() }
+fn default_version() -> String {
+    "0.1.1".to_string()
+}
 
 #[cfg(target_os = "linux")]
 fn default_addon_dir() -> PathBuf {
