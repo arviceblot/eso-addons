@@ -56,7 +56,7 @@
                     Version 0.4.13 includes minor security and bug fixes:
                 </p>
                 <ul>
-                    <li></li>
+                    <li>New: Add option to check for addon updates on app launch</li>
                 </ul>
             </description>
         </release>

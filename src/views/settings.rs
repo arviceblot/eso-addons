@@ -180,13 +180,11 @@ impl View for Settings {
             ui.separator();
             ui.add_space(5.0);
 
-            // ui.checkbox(
-            //     // TODO: make this mean something, currently has no effect
-            //     &mut service.config.update_on_launch,
-            //     "Check for updates on launch",
-            // );
             ui.label(RichText::new("Updates").heading());
             ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut service.config.update_on_launch, "Check for updates on launch")
+            });
             ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut service.config.update_ttc_pricetable,

@@ -138,8 +138,13 @@ impl EamApp {
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
         };
-        // check for update on init
-        app.check_update();
+        if app.service.config.update_on_launch {
+            // check for update on init
+            app.check_update();
+        } else {
+            app.get_installed_addons();
+            app.check_missing_deps();
+        }
         app
     }
 
