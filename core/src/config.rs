@@ -13,11 +13,17 @@ pub const EAM_CONF: &str = "config.json";
 pub const EAM_DB: &str = "addons.db";
 
 const STEAMDECK_DEFAULT_ADDON_DIR: &str = ".local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns";
-//const STEAMDECK_DEFAULT_CONFIG_DIR: &str = "/home/deck/.config";
-const WINDOWS_DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
-const LINUX_DEFAULT_ADDON_DIR: &str =
-    "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
 
+#[cfg(target_os = "linux")]
+const DEFAULT_ADDON_DIR: &str = "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+
+#[cfg(target_os = "macos")]
+const DEFAULT_ADDON_DIR: &str = "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+
+#[cfg(target_os = "windows")]
+const DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
+
+// service crate version
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -188,25 +194,13 @@ fn default_version() -> String {
     "0.1.1".to_string()
 }
 
-#[cfg(target_os = "linux")]
 fn default_addon_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR)
-}
-
-#[cfg(target_os = "windows")]
-fn default_addon_dir() -> PathBuf {
-    let addon_dir = dirs::home_dir().unwrap();
-    addon_dir.join("Documents/Elder Scrolls Online/live/AddOns")
-}
-
-#[cfg(target_os = "macos")]
-fn default_addon_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR)
+    dirs::home_dir().unwrap().join(DEFAULT_ADDON_DIR)
 }
 
 pub fn detect_addon_dir() -> PathBuf {
     let addon_dir = dirs::home_dir().unwrap();
-    for ext_path in [STEAMDECK_DEFAULT_ADDON_DIR, WINDOWS_DEFAULT_ADDON_DIR] {
+    for ext_path in [STEAMDECK_DEFAULT_ADDON_DIR, DEFAULT_ADDON_DIR] {
         let path_opt = addon_dir.join(ext_path);
         if path_opt.exists() {
             return path_opt;
