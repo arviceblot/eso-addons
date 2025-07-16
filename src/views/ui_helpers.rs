@@ -9,10 +9,10 @@ use eframe::{
 };
 use eso_addons_core::service::result::{AddonShowDetails, MissingDepView};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use serde::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 
-#[derive(Debug, PartialEq, Clone, Copy, EnumIter)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[derive(Debug, PartialEq, Clone, Copy, EnumIter, Serialize, Deserialize)]
 pub enum Sort {
     Name,
     Updated,
@@ -41,8 +41,7 @@ impl Default for Sort {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewOpt {
     /// Not really a reachable view, but a base
     Root,
@@ -402,7 +401,7 @@ fn ui_show_bbnode(ui: &mut egui::Ui, tree: &BBTree, i: i32, parent_nodes: &mut V
         BBTag::ListUnordered => {
             children_handled = true;
             ui.vertical(|ui| {
-                ui.style_mut().wrap = Some(true);
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Wrap);
                 if let Some(title) = &node.value {
                     if !title.is_empty() {
                         ui.label(node.text.as_str());

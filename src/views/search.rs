@@ -72,7 +72,7 @@ impl Search {
             .set(service.get_addons_by_category(self.selected_category));
     }
 
-    fn get_cagetory_title(&self, category_id: i32) -> String {
+    fn get_category_title(&self, category_id: i32) -> String {
         self.categories.get(&category_id).unwrap().title.to_owned()
     }
 
@@ -181,10 +181,10 @@ impl View for Search {
             self.handle_sort();
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                egui::ComboBox::from_id_source("search_category")
-                    .selected_text(self.get_cagetory_title(self.selected_category))
+                egui::ComboBox::from_id_salt("search_category")
+                    .selected_text(self.get_category_title(self.selected_category))
                     .show_ui(ui, |ui| {
-                        ui.style_mut().wrap = Some(false);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         for category in self.get_categories.value.as_ref().unwrap() {
                             ui.selectable_value(
                                 &mut self.selected_category,
@@ -193,10 +193,10 @@ impl View for Search {
                             );
                         }
                     });
-                egui::ComboBox::from_id_source("search_sort")
+                egui::ComboBox::from_id_salt("search_sort")
                     .selected_text(format!("Sort By: {}", self.sort.to_string().to_uppercase()))
                     .show_ui(ui, |ui| {
-                        ui.style_mut().wrap = Some(false);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                         ui.set_min_width(60.0);
                         for sort in Sort::iter() {
                             ui.selectable_value(&mut self.sort, sort, sort.to_string());

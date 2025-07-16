@@ -113,6 +113,7 @@ impl Config {
                 info!("No config file, creating at: {}", config_filepath.display());
                 OpenOptions::new()
                     .create(true)
+                    .truncate(true)
                     .write(true)
                     .open(&config_filepath)
                     .unwrap();

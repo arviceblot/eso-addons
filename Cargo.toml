@@ -10,14 +10,14 @@ license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
 
 [profile.release]
-opt-level = 'z'     # Optimize for size
-lto = true          # Enable link-time optimization
-codegen-units = 1   # Reduce number of codegen units to increase optimizations
-panic = 'abort'     # Abort on panic
-strip = true        # Strip symbols from binary*
+opt-level = 'z'   # Optimize for size
+lto = true        # Enable link-time optimization
+codegen-units = 1 # Reduce number of codegen units to increase optimizations
+panic = 'abort'   # Abort on panic
+strip = true      # Strip symbols from binary*
 
 [workspace]
-members = [".", "core", "entity", "migration"]
+members = [".", "core", "entity", "migration", "cli"]
 
 [[bin]]
 name = "eso-addon-manager"
@@ -47,3 +47,4 @@ egui_extras = { version = "0.29.1", features = ["all_loaders"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
 rfd = "0.13.0"
 hostname = "0.4.0"
+serde = { version = "1", features = ["derive"] }
