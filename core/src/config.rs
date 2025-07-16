@@ -4,6 +4,7 @@ use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
+use version_compare::Version;
 
 use tracing::log::info;
 
@@ -12,10 +13,30 @@ pub const EAM_CONF: &str = "config.json";
 pub const EAM_DB: &str = "addons.db";
 
 const STEAMDECK_DEFAULT_ADDON_DIR: &str = ".local/share/Steam/steamapps/compatdata/306130/pfx/drive_c/users/steamuser/My Documents/Elder Scrolls Online/live/AddOns";
-//const STEAMDECK_DEFAULT_CONFIG_DIR: &str = "/home/deck/.config";
-const WINDOWS_DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
-const LINUX_DEFAULT_ADDON_DIR: &str =
-    "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+
+#[cfg(target_os = "linux")]
+const DEFAULT_ADDON_DIR: &str = "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+
+#[cfg(target_os = "macos")]
+const DEFAULT_ADDON_DIR: &str = "drive_c/users/user/My Documents/Elder Scrolls Online/live/AddOns";
+
+#[cfg(target_os = "windows")]
+const DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
+
+// service crate version
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum TTCRegion {
+    NA,
+    EU,
+    ALL,
+}
+impl Default for TTCRegion {
+    fn default() -> Self {
+        Self::NA // sorry, EU!
+    }
+}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct AddonEntry {
@@ -52,6 +73,8 @@ impl Default for Style {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Config {
+    #[serde(default = "default_version")]
+    pub version: String,
     #[serde(default = "default_addon_dir")]
     pub addon_dir: PathBuf,
     #[serde(default = "default_str")]
@@ -64,7 +87,7 @@ pub struct Config {
     pub category_list: String,
     #[serde(default)]
     pub update_ttc_pricetable: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub update_on_launch: bool,
     #[serde(default = "default_true")]
     pub onboard: bool,
@@ -72,6 +95,8 @@ pub struct Config {
     pub update_hm_data: bool,
     #[serde(default)]
     pub style: Style,
+    #[serde(default)]
+    pub ttc_region: TTCRegion,
 }
 impl Config {
     pub fn load() -> Config {
@@ -83,7 +108,7 @@ impl Config {
         }
         let config_filepath = Self::default_config_path();
         // create config file if not exists, with defaults
-        let config: Config = match config_filepath.exists() {
+        let mut config: Config = match config_filepath.exists() {
             true => {
                 let config_data = fs::read_to_string(&config_filepath)
                     .context(error::ConfigLoadSnafu {
@@ -124,6 +149,18 @@ impl Config {
             }
         };
 
+        // check conf version upgrades
+        let conf_version = Version::from(&config.version).unwrap();
+        if conf_version < Version::from("0.1.2").unwrap() {
+            // set auto update true as default when updating conf version, previous default was false
+            config.update_on_launch = true;
+        }
+
+        // update conf version
+        if conf_version < Version::from(VERSION).unwrap() {
+            config.version = VERSION.to_string();
+        }
+
         // write defaults for immediate use
         config.save().unwrap();
         config
@@ -153,25 +190,17 @@ fn default_true() -> bool {
     true
 }
 
-#[cfg(target_os = "linux")]
-fn default_addon_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR)
+fn default_version() -> String {
+    "0.1.1".to_string()
 }
 
-#[cfg(target_os = "windows")]
 fn default_addon_dir() -> PathBuf {
-    let addon_dir = dirs::home_dir().unwrap();
-    addon_dir.join("Documents/Elder Scrolls Online/live/AddOns")
-}
-
-#[cfg(target_os = "macos")]
-fn default_addon_dir() -> PathBuf {
-    dirs::home_dir().unwrap().join(LINUX_DEFAULT_ADDON_DIR)
+    dirs::home_dir().unwrap().join(DEFAULT_ADDON_DIR)
 }
 
 pub fn detect_addon_dir() -> PathBuf {
     let addon_dir = dirs::home_dir().unwrap();
-    for ext_path in [STEAMDECK_DEFAULT_ADDON_DIR, WINDOWS_DEFAULT_ADDON_DIR] {
+    for ext_path in [STEAMDECK_DEFAULT_ADDON_DIR, DEFAULT_ADDON_DIR] {
         let path_opt = addon_dir.join(ext_path);
         if path_opt.exists() {
             return path_opt;

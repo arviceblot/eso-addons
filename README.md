@@ -1,5 +1,7 @@
 # ESO Addon Manager
 
+[![dependency status](https://deps.rs/repo/github/arviceblot/eso-addons/status.svg)](https://deps.rs/repo/github/arviceblot/eso-addons)
+
 A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.
 
 ![Image of main window](/docs/images/main.png)
@@ -14,7 +16,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 - Light and dark UI themes
 - No Java!
 - Import managed addons from Minion
-- Suggest installing addons for any missing depenencies
+- Suggest installing addons for any missing dependencies
 
 ## Installing
 
@@ -34,7 +36,6 @@ flatpak install com.arviceblot.eso-addon-manager
 
 Download the `.AppImage` from the [releases](https://github.com/arviceblot/eso-addons/releases) page.
 
-
 #### Build latest from source
 
 ```shell
@@ -43,7 +44,7 @@ cargo install --git https://github.com/arviceblot/eso-addons.git
 
 ### macOS and Windows
 
-Downlaod the appropriate file for your OS from the [releases](https://github.com/arviceblot/eso-addons/releases) page.
+Download the appropriate file for your OS from the [releases](https://github.com/arviceblot/eso-addons/releases) page.
 
 ## Running
 

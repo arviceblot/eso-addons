@@ -7,62 +7,15 @@ use std::{
 use entity::addon_dir as AddonDir;
 use regex::Regex;
 use snafu::ResultExt;
-use walkdir::WalkDir;
 
 use crate::{
-    addons::{Addon, AddonList},
+    addons::Addon,
     error::{self, Result},
 };
 
 fn extract_dependency(dep: &str) -> Option<String> {
     let re = Regex::new(r"^(.+?)(([<=>]+)(.*))?$").unwrap();
     re.captures(dep).map(|captures| captures[1].to_owned())
-}
-
-pub fn fs_get_addon(addon_dir: &PathBuf, name: &str) -> Result<Option<Addon>> {
-    let addon_list = fs_get_addons(addon_dir)?;
-    let found = addon_list.addons.into_iter().find(|x| x.name == name);
-    Ok(found)
-}
-
-pub fn fs_get_addons(addon_dir: &PathBuf) -> Result<AddonList> {
-    // TODO: move to fs_util, tak addon_dir as param
-    let mut addon_list = AddonList {
-        addons: vec![],
-        errors: vec![],
-    };
-
-    // Ok(fs::metadata(addon_dir));
-
-    fs::metadata(addon_dir).context(error::AddonDirMetadataSnafu { dir: &addon_dir })?;
-
-    for entry in WalkDir::new(addon_dir) {
-        let entry_dir = entry.unwrap();
-        let file_path = entry_dir.path();
-
-        let file_name = entry_dir.file_name();
-        let parent_dir_name = file_path.parent().and_then(|f| f.file_name());
-
-        match parent_dir_name {
-            None => continue,
-            Some(parent_dir_name) => {
-                let mut name = parent_dir_name.to_os_string();
-                name.push(".txt");
-                if name != file_name {
-                    continue;
-                }
-            }
-        }
-
-        let addon_dir = file_path.parent().unwrap();
-
-        match fs_read_addon(addon_dir) {
-            Ok(addon) => addon_list.addons.push(addon),
-            Err(err) => println!("{err}"), //addon_list.errors.push(err),
-        }
-    }
-
-    Ok(addon_list)
 }
 
 fn fs_open_addon_metadata_file(path: &Path, addon_name: &str) -> Result<File> {

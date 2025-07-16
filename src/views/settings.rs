@@ -180,24 +180,29 @@ impl View for Settings {
             ui.separator();
             ui.add_space(5.0);
 
-            // ui.checkbox(
-            //     // TODO: make this mean something, currently has no effect
-            //     &mut service.config.update_on_launch,
-            //     "Check for updates on launch",
-            // );
             ui.label(RichText::new("Updates").heading());
             ui.add_space(5.0);
             ui.horizontal(|ui| {
+                ui.checkbox(&mut service.config.update_on_launch, "Check for addon updates on launch")
+            });
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_label("TTC Region").selected_text(format!("{:?}", service.config.ttc_region)).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::NA, "NA");
+                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::EU, "EU");
+                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::ALL, "All");
+                });
+            });
+            ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut service.config.update_ttc_pricetable,
-                    "Update TTC PriceTable on launch",
+                    "Update TTC PriceTable",
                 );
                 ui.label("(requires TamrielTradeCentre to be installed)");
             });
             ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut service.config.update_hm_data,
-                    "Update HarvestMap data on launch",
+                    "Update HarvestMap data",
                 );
                 ui.label("(requires HarvestMap-Data to be installed)");
             });
@@ -304,7 +309,6 @@ impl View for Settings {
             //                 class == egui::ViewportClass::Immediate,
             //                 "This egui backend doesn't support multiple viewports"
             //             );
-    
             //             egui::CentralPanel::default().show(ctx, |ui| {
             //                 ui.add(egui_tracing::Logs::new(self.collector.clone()))
             //             });
@@ -317,7 +321,7 @@ impl View for Settings {
 
             ui.label(RichText::new("About").heading());
             ui.add_space(5.0);
-            ui.label(format!("Version: {}", VERSION));
+            ui.label(format!("Version: {VERSION}"));
             if let Some(repo) = REPO {
                 ui.hyperlink_to(" GitHub", repo);
             }
