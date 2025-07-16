@@ -458,7 +458,7 @@ impl eframe::App for EamApp {
                     if installing_count > 0 {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(format!("Installing {} addons", installing_count));
+                            ui.label(format!("Installing {installing_count} addons"));
                         });
                     }
                     let updating_count =
@@ -466,7 +466,7 @@ impl eframe::App for EamApp {
                     if updating_count > 0 {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            ui.label(format!("Updating {} addons", updating_count));
+                            ui.label(format!("Updating {updating_count} addons"));
                         });
                     }
                 });

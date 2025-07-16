@@ -114,9 +114,9 @@ impl AddonService {
         }
 
         if update {
-            info!("Updating addon: {}", addon_id);
+            info!("Updating addon: {addon_id}");
         } else {
-            info!("Installing addon: {}", addon_id);
+            info!("Installing addon: {addon_id}");
         }
 
         let installed = self
@@ -350,7 +350,7 @@ impl AddonService {
             return Ok(());
         }
 
-        info!("Downloading addon details for addon: {}", id);
+        info!("Downloading addon details for addon: {id}");
 
         let file_details = self.api.get_file_details(id).await?;
         let record = AddonDetail::ActiveModel {
@@ -604,7 +604,7 @@ impl AddonService {
             service.p_update_addon_details(addon_id).await.unwrap();
 
             // get the details we need
-            info!("Loading addon details for id: {}", addon_id);
+            info!("Loading addon details for id: {addon_id}");
             let result = DbAddon::Entity::find_by_id(addon_id)
                 .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
@@ -687,7 +687,7 @@ impl AddonService {
             let hash = hasher.finalize().to_vec();
             let mut hash_string = String::new();
             for x in hash.iter() {
-                hash_string.push_str(format!("{:02x}", x).as_str());
+                hash_string.push_str(format!("{x:02x}").as_str());
             }
             ensure!(
                 md5 == hash_string,
@@ -972,7 +972,7 @@ impl AddonService {
                     // ... else, use empty table to create a placeholder
                     let file_data = format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str());
                     let mut output = File::create(sv_fn2.clone())?;
-                    write!(output, "{}", file_data)?;
+                    write!(output, "{file_data}")?;
                 }
 
                 let sv_fn2_data = fs::read_to_string(sv_fn2).unwrap();
@@ -998,7 +998,7 @@ impl AddonService {
     ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
-            info!("Getting addons by author: {}", author);
+            info!("Getting addons by author: {author}");
             let results = DbAddon::Entity::find()
                 .column_as(DbAddon::Column::Version, "version")
                 .column_as(InstalledAddon::Column::Version, "installed_version")

@@ -103,7 +103,7 @@ impl View for MissingDeps {
                         ui.add_enabled_ui(!dep_opt.ignore, |ui| {
                             // select from installed addons
                             ui.label("Already Installed:");
-                            egui::ComboBox::from_id_salt(format!("satisfied_by_{}", missing_dir))
+                            egui::ComboBox::from_id_salt(format!("satisfied_by_{missing_dir}"))
                                 .selected_text(
                                     self.addon_map
                                         .get(&dep_opt.satisfied_by.unwrap_or(0))
@@ -124,7 +124,7 @@ impl View for MissingDeps {
                             if !dep_opt.options.is_empty() {
                                 // select from suggested addon
                                 ui.label("Install Suggested:");
-                                egui::ComboBox::from_id_salt(format!("opt_by_{}", missing_dir))
+                                egui::ComboBox::from_id_salt(format!("opt_by_{missing_dir}"))
                                     .selected_text(
                                         dep_opt
                                             .options

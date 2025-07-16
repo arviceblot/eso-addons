@@ -321,7 +321,7 @@ impl View for Settings {
 
             ui.label(RichText::new("About").heading());
             ui.add_space(5.0);
-            ui.label(format!("Version: {}", VERSION));
+            ui.label(format!("Version: {VERSION}"));
             if let Some(repo) = REPO {
                 ui.hyperlink_to(" GitHub", repo);
             }
