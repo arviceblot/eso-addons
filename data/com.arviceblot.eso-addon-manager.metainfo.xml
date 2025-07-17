@@ -40,14 +40,11 @@
             <caption>Main view showing installed addons</caption>
         </screenshot>
         <screenshot>
-            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/main-dark.png</image>
-        </screenshot>
-        <screenshot>
             <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/browse.png</image>
             <caption>Search and browse installable addons</caption>
         </screenshot>
         <screenshot>
-            <image></image>
+            <image>https://raw.githubusercontent.com/arviceblot/eso-addons/master/docs/images/details.png</image>
             <caption>Browse addon details and images</caption>
         </screenshot>
         <screenshot>
@@ -57,7 +54,7 @@
     </screenshots>
 
     <releases>
-        <release version="0.4.13" date="XXXX-XX-XX">
+        <release version="0.4.13" date="2025-07-17">
             <description>
                 <p>
                     Version 0.4.13 includes a new addon list view and settings options:
@@ -68,7 +65,7 @@
                     <li>New: Add individual indicators for long-running tasks</li>
                     <li>New: URLs are now visible on hyperlink hover</li>
                     <li>New: Add application icon to native window titlebar (macOS, Wayland not supported yet)</li>
-                    <li>Change: Addon list is more compact</li>
+                    <li>Change: Addon list view is now more compact</li>
                     <li>Fix: Addon action buttons won't float away on resize</li>
                 </ul>
             </description>
