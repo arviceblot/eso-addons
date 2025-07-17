@@ -34,7 +34,7 @@ args = [
 [dependencies]
 eframe = "0.32.0"
 tokio = { version = "1.45.1", features = ["full"] }
-eso-addons-core = { path = "./core" }
+eso-addons-core = { version = "0.1.2", path = "./core" }
 strum = "0.27.1"
 strum_macros = "0.27.1"
 lazy_async_promise = "0.6.0"
