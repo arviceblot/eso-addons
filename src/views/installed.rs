@@ -203,9 +203,7 @@ impl View for Installed {
                             .contains(self.filter.to_lowercase().as_str())
                     })
                     .collect();
-                ui.centered_and_justified(|ui| {
-                    response = AddonTable::new(&addons).installable(true).ui(ui);
-                });
+                response = AddonTable::new(&addons).installable(true).ui(ui);
             });
         }
 

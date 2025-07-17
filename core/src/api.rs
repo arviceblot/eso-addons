@@ -89,6 +89,7 @@ impl ApiClient {
     }
 
     pub async fn download_file(&self, url: &str) -> Result<Response> {
+        info!("Downloading: {url}");
         let response = self
             .client
             .get(url)
@@ -250,7 +251,8 @@ where
     let s: u64 = Deserialize::deserialize(deserializer)
         .map_err(D::Error::custom)
         .unwrap();
-    let datetime = DateTime::from_timestamp_millis(s.try_into().unwrap()).expect("invalid timestamp");
+    let datetime =
+        DateTime::from_timestamp_millis(s.try_into().unwrap()).expect("invalid timestamp");
     Ok(datetime)
 }
 

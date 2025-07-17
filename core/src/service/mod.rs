@@ -7,7 +7,7 @@ use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
-use crate::config::{self, Config};
+use crate::config::{self, Config, TTCRegion};
 use crate::error::{self, AddonDownloadHashSnafu, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
@@ -51,12 +51,20 @@ pub struct AddonService {
 impl AddonService {
     pub async fn new() -> Self {
         // setup config
-        let config = Config::load();
+        let mut config = Config::load();
 
         // init api/download client
         let mut client = ApiClient::default();
         if config.file_list.is_empty() {
             client.update_endpoints().await.unwrap();
+            info!("Saving config");
+            client.file_details_url.clone_into(&mut config.file_details);
+            client.file_list_url.clone_into(&mut config.file_list);
+            client.list_files_url.clone_into(&mut config.list_files);
+            client
+                .category_list_url
+                .clone_into(&mut config.category_list);
+            config.save().unwrap();
         } else {
             client.update_endpoints_from_config(&config);
         }
@@ -106,9 +114,9 @@ impl AddonService {
         }
 
         if update {
-            info!("Updating addon: {}", addon_id);
+            info!("Updating addon: {addon_id}");
         } else {
-            info!("Installing addon: {}", addon_id);
+            info!("Installing addon: {addon_id}");
         }
 
         let installed = self
@@ -323,58 +331,8 @@ impl AddonService {
             if upgrade_all {
                 result = service.upgrade().await.unwrap();
             }
-
-            info!("Saving config");
-            service
-                .api
-                .file_details_url
-                .clone_into(&mut service.config.file_details);
-            service
-                .api
-                .file_list_url
-                .clone_into(&mut service.config.file_list);
-            service
-                .api
-                .list_files_url
-                .clone_into(&mut service.config.list_files);
-            service
-                .api
-                .category_list_url
-                .clone_into(&mut service.config.category_list);
-
-            service.config.save()?;
-
             Ok(result)
         })
-    }
-
-    async fn get_missing_addon_detail_ids(&self) -> Result<Vec<i32>> {
-        let mut results = vec![];
-        info!("Getting addons with missing or outdated details");
-        let addons = DbAddon::Entity::find()
-            .left_join(AddonDetail::Entity)
-            .filter(
-                Condition::any()
-                    .add(AddonDetail::Column::Version.is_null())
-                    .add(
-                        Expr::col((DbAddon::Entity, DbAddon::Column::Version)).ne(Expr::col((
-                            AddonDetail::Entity,
-                            AddonDetail::Column::Version,
-                        ))),
-                    )
-                    .add(DbAddon::Column::Md5.is_null())
-                    .add(DbAddon::Column::FileName.is_null())
-                    .add(DbAddon::Column::Download.is_null())
-                    .to_owned(),
-            )
-            .all(&self.db)
-            .await
-            .context(error::DbPutSnafu)?;
-        if addons.is_empty() {
-            return Ok(results);
-        }
-        results = addons.iter().map(|x| x.id).collect();
-        Ok(results)
     }
 
     async fn p_update_addon_details(&self, id: i32) -> Result<()> {
@@ -392,7 +350,7 @@ impl AddonService {
             return Ok(());
         }
 
-        info!("Downloading addon details for addon: {}", id);
+        info!("Downloading addon details for addon: {id}");
 
         let file_details = self.api.get_file_details(id).await?;
         let record = AddonDetail::ActiveModel {
@@ -646,7 +604,7 @@ impl AddonService {
             service.p_update_addon_details(addon_id).await.unwrap();
 
             // get the details we need
-            info!("Loading addon details for id: {}", addon_id);
+            info!("Loading addon details for id: {addon_id}");
             let result = DbAddon::Entity::find_by_id(addon_id)
                 .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
@@ -729,7 +687,7 @@ impl AddonService {
             let hash = hasher.finalize().to_vec();
             let mut hash_string = String::new();
             for x in hash.iter() {
-                hash_string.push_str(format!("{:02x}", x).as_str());
+                hash_string.push_str(format!("{x:02x}").as_str());
             }
             ensure!(
                 md5 == hash_string,
@@ -803,12 +761,20 @@ impl AddonService {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            service
-                .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
-                .await?;
-            service
-                .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
-                .await?;
+            if service.config.ttc_region == TTCRegion::NA
+                || service.config.ttc_region == TTCRegion::ALL
+            {
+                service
+                    .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
+                    .await?;
+            }
+            if service.config.ttc_region == TTCRegion::EU
+                || service.config.ttc_region == TTCRegion::ALL
+            {
+                service
+                    .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
+                    .await?;
+            }
             Ok(())
         })
     }
@@ -1006,7 +972,7 @@ impl AddonService {
                     // ... else, use empty table to create a placeholder
                     let file_data = format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str());
                     let mut output = File::create(sv_fn2.clone())?;
-                    write!(output, "{}", file_data)?;
+                    write!(output, "{file_data}")?;
                 }
 
                 let sv_fn2_data = fs::read_to_string(sv_fn2).unwrap();
@@ -1032,7 +998,7 @@ impl AddonService {
     ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
-            info!("Getting addons by author: {}", author);
+            info!("Getting addons by author: {author}");
             let results = DbAddon::Entity::find()
                 .column_as(DbAddon::Column::Version, "version")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
