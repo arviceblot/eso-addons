@@ -44,5 +44,4 @@ dotenv = "0.15.0"
 egui_extras = { version = "0.32.0", features = ["all_loaders"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
 rfd = "0.15.4"
-hostname = "0.4.0"
 serde = "1.0.219"

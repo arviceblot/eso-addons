@@ -37,14 +37,12 @@ async fn main() -> Result<(), eframe::Error> {
     //     .with(collector.clone())
     //     .init();
 
-    let hostname = hostname::get().unwrap();
     let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../data/icon.png")[..])
         .expect("Failed to load icon");
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([960.0, 600.0])
-            .with_min_inner_size([800.0, 500.0])
-            .with_fullscreen(hostname == "steamdeck"), // attempt steamdeck resolution fix in game mode
+            .with_min_inner_size([800.0, 500.0]),
         // follow_system_theme: true, // as of 2024-02-19, does not work on linux. TODO: figure out if we need to move this
         ..Default::default()
     };
