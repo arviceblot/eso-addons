@@ -54,6 +54,13 @@
     </screenshots>
 
     <releases>
+        <release version="0.4.14" date="2025-08-09">
+            <description>
+                <p>
+                    Version 0.4.14 brings a slinky-dinky fix for Steam Deck desktop mode.
+                </p>
+            </description>
+        </release>
         <release version="0.4.13" date="2025-07-17">
             <description>
                 <p>
