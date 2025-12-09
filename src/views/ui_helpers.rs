@@ -3,9 +3,9 @@ use tracing::log::error;
 
 use eframe::{
     egui::{
-        self,
+        self, Image, RichText, TextFormat, TextStyle,
         text::{LayoutJob, TextWrapping},
-        vec2, Image, RichText, TextFormat, TextStyle,
+        vec2,
     },
     epaint::Color32,
 };

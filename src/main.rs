@@ -1,8 +1,8 @@
 use dotenv::dotenv;
-use eframe::egui::{self, vec2, RichText, Visuals};
+use eframe::egui::{self, RichText, Visuals, vec2};
 use eso_addons_core::config;
-use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use eso_addons_core::service::AddonService;
+use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
 use std::sync::Arc;

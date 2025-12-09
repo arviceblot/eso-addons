@@ -1,19 +1,19 @@
 use super::{
+    ResetView, View,
     ui_helpers::{
-        truncate_len,
-        ui_show_star,
         AddonResponse,
         AddonResponseType,
         PromisedValue,
         // ui_show_bbtree,
+        truncate_len,
+        ui_show_star,
     },
-    ResetView, View,
 };
 // use bbcode_tagger::BBTree;
-use eframe::egui::{self, vec2, Image, ImageButton, Layout, RichText, ScrollArea};
+use eframe::egui::{self, Image, ImageButton, Layout, RichText, ScrollArea, vec2};
 use eso_addons_core::service::{
-    result::{AddonImageResult, AddonShowDetails},
     AddonService,
+    result::{AddonImageResult, AddonShowDetails},
 };
 // use tracing::info;
 
