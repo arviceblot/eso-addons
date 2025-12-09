@@ -8,7 +8,7 @@ use self::result::*;
 use crate::addons::{get_root_dir, Addon};
 use crate::api::ApiClient;
 use crate::config::{self, Config, TTCRegion};
-use crate::error::{self, AddonDownloadHashSnafu, Result};
+use crate::error::{self, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
