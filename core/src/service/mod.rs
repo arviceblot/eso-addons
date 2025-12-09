@@ -514,11 +514,11 @@ impl AddonService {
         })
     }
 
-    pub async fn get_installed_addon_count(&self) -> Result<i32> {
+    pub async fn get_installed_addon_count(&self) -> Result<u64> {
         let count = InstalledAddon::Entity::find()
             .count(&self.db)
             .await
-            .context(error::DbGetSnafu)? as i32;
+            .context(error::DbGetSnafu)?;
         Ok(count)
     }
 
@@ -682,22 +682,24 @@ impl AddonService {
 
         // check hash if present
         if let Some(md5) = md5 {
-            let mut hasher = Md5::new();
-            io::copy(&mut r_tmpfile, &mut hasher).unwrap();
-            let hash = hasher.finalize().to_vec();
-            let mut hash_string = String::new();
-            for x in hash.iter() {
-                hash_string.push_str(format!("{x:02x}").as_str());
-            }
-            ensure!(
-                md5 == hash_string,
-                AddonDownloadHashSnafu {
-                    file_name: String::from(url),
-                    expected_hash: md5,
-                    actual_hash: hash_string
+            if !md5.trim().is_empty() {
+                let mut hasher = Md5::new();
+                io::copy(&mut r_tmpfile, &mut hasher).unwrap();
+                let hash = hasher.finalize().to_vec();
+                let mut hash_string = String::new();
+                for x in hash.iter() {
+                    hash_string.push_str(format!("{x:02x}").as_str());
                 }
-            );
-            r_tmpfile.rewind().unwrap();
+                ensure!(
+                    md5 == hash_string,
+                    AddonDownloadHashSnafu {
+                        file_name: String::from(url),
+                        expected_hash: md5,
+                        actual_hash: hash_string
+                    }
+                );
+                r_tmpfile.rewind().unwrap();
+            }
         }
 
         let mut archive =
