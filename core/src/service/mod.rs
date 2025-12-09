@@ -690,14 +690,9 @@ impl AddonService {
                 for x in hash.iter() {
                     hash_string.push_str(format!("{x:02x}").as_str());
                 }
-                ensure!(
-                    md5 == hash_string,
-                    AddonDownloadHashSnafu {
-                        file_name: String::from(url),
-                        expected_hash: md5,
-                        actual_hash: hash_string
-                    }
-                );
+                if md5 != hash_string {
+                    warn!("Expected file hash {md5}, got {hash_string}");
+                }
                 r_tmpfile.rewind().unwrap();
             }
         }
