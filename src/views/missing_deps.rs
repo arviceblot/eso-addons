@@ -1,10 +1,10 @@
 use eframe::egui::{self, Layout, RichText};
 use eso_addons_core::service::result::{AddonDepOption, AddonMap, MissingDepView};
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
-use super::ui_helpers::{AddonResponse, AddonResponseType};
 use super::View;
+use super::ui_helpers::{AddonResponse, AddonResponseType};
 
 #[derive(Default)]
 pub struct MissingDeps {

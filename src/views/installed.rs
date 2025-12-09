@@ -1,12 +1,12 @@
 use tracing::log::info;
 
 use eframe::egui::{self, Layout, RichText, TextWrapMode};
-use eso_addons_core::service::{result::AddonShowDetails, AddonService};
+use eso_addons_core::service::{AddonService, result::AddonShowDetails};
 use strum::IntoEnumIterator;
 
 use super::{
-    ui_helpers::{AddonResponse, AddonResponseType, AddonTable, Sort},
     View,
+    ui_helpers::{AddonResponse, AddonResponseType, AddonTable, Sort},
 };
 
 #[derive(Default)]

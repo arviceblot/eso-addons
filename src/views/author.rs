@@ -1,6 +1,6 @@
 use eframe::egui::{self, RichText};
-use eso_addons_core::service::result::AddonShowDetails;
 use eso_addons_core::service::AddonService;
+use eso_addons_core::service::result::AddonShowDetails;
 
 use super::ui_helpers::{AddonResponse, AddonResponseType, AddonTable, PromisedValue};
 use super::{ResetView, View};

@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use super::{
-    ui_helpers::{AddonResponse, AddonTable, PromisedValue, Sort},
     ResetView, View,
+    ui_helpers::{AddonResponse, AddonTable, PromisedValue, Sort},
 };
 use eframe::egui::{self, TextWrapMode};
 use eso_addons_core::service::{
-    result::{AddonShowDetails, CategoryResult},
     AddonService,
+    result::{AddonShowDetails, CategoryResult},
 };
 use strum::IntoEnumIterator;
 use tracing::log::info;

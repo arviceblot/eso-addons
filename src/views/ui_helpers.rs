@@ -3,9 +3,9 @@ use tracing::log::error;
 
 use eframe::{
     egui::{
-        self,
+        self, Image, RichText, TextFormat, TextStyle,
         text::{LayoutJob, TextWrapping},
-        vec2, Image, RichText, TextFormat, TextStyle,
+        vec2,
     },
     epaint::Color32,
 };
@@ -13,7 +13,9 @@ use eso_addons_core::service::result::{AddonShowDetails, MissingDepView};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use strum_macros::EnumIter;
 
-#[derive(Debug, PartialEq, Clone, Copy, EnumIter, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Debug, PartialEq, Clone, Copy, EnumIter, serde::Deserialize, serde::Serialize, Default,
+)]
 pub enum Sort {
     Name,
     Updated,
@@ -21,6 +23,7 @@ pub enum Sort {
     TotalDownloads,
     MonthlyDownloads,
     Favorites,
+    #[default]
     Id,
 }
 impl fmt::Display for Sort {
@@ -34,11 +37,6 @@ impl fmt::Display for Sort {
             Sort::Favorites => write!(f, "Favorites"),
             Sort::Id => write!(f, "ID"),
         }
-    }
-}
-impl Default for Sort {
-    fn default() -> Self {
-        Self::Id
     }
 }
 
@@ -112,8 +110,9 @@ pub fn truncate_len(text: &String, length: usize) -> String {
 
 use egui_extras::{Column, TableBuilder};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Default)]
 pub enum AddonResponseType {
+    #[default]
     None,
     AddonName,
     /// Generic response that the installed addons have changed
@@ -127,11 +126,6 @@ pub enum AddonResponseType {
     InstallMissingDeps,
     Remove,
     Close,
-}
-impl Default for AddonResponseType {
-    fn default() -> Self {
-        Self::None
-    }
 }
 pub struct AddonResponse {
     pub addon_id: i32,

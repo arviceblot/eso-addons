@@ -54,6 +54,18 @@
     </screenshots>
 
     <releases>
+        <release version="0.4.14" date="2025-12-09">
+            <description>
+                <p>
+                    Version 0.4.14 brings a slinky-dinky fix for Steam Deck desktop mode.
+                </p>
+                <ul>
+                    <li>Change: Update dependencies</li>
+                    <li>Fix: App starting in fullscreen on Steam Deck desktop mode</li>
+                    <li>Fix: Crash with empty addon file hash</li>
+                </ul>
+            </description>
+        </release>
         <release version="0.4.13" date="2025-07-17">
             <description>
                 <p>
