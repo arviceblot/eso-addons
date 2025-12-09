@@ -26,16 +26,12 @@ const DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
 // service crate version
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum TTCRegion {
+    #[default] // sorry, EU!
     NA,
     EU,
     ALL,
-}
-impl Default for TTCRegion {
-    fn default() -> Self {
-        Self::NA // sorry, EU!
-    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -59,16 +55,12 @@ impl serde::Serialize for AddonEntry {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum Style {
     Light,
     Dark,
+    #[default]
     System,
-}
-impl Default for Style {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]

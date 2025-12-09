@@ -3,9 +3,8 @@ name = "eso-addon-manager"
 version = "0.4.14"
 authors = [
     "arviceblot <github@relay.arviceblot.com>",
-    "Damian Czaja <trojan295@protonmail.com>",
 ]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/arviceblot/eso-addons"
 

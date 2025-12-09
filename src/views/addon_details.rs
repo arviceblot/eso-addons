@@ -17,17 +17,13 @@ use eso_addons_core::service::{
 };
 // use tracing::info;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Default)]
 enum DetailView {
+    #[default]
     Description,
     ChangeLog,
     Pictures,
     FileInfo,
-}
-impl Default for DetailView {
-    fn default() -> Self {
-        Self::Description
-    }
 }
 
 #[derive(Default)]
