@@ -200,8 +200,8 @@ impl View for Search {
                 );
                 if !self.search.is_empty() && ui.button("🗙").clicked() {
                     self.search.clear();
-                    if self.results.value.is_some() {
-                        self.results.value.as_mut().unwrap().clear();
+                    if let Some(results) = &mut self.results.value {
+                        results.clear();
                     }
                 }
             });
