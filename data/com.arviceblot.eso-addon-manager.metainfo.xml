@@ -32,6 +32,7 @@
 
     <url type="homepage">https://github.com/arviceblot/eso-addons</url>
     <url type="bugtracker">https://github.com/arviceblot/eso-addons/issues</url>
+    <url type="vcs-browser">https://github.com/arviceblot/eso-addons</url>
 
     <launchable type="desktop-id">com.arviceblot.eso-addon-manager.desktop</launchable>
     <screenshots>
