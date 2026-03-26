@@ -54,6 +54,17 @@
     </screenshots>
 
     <releases>
+        <release version="0.4.15" date="2026-03-26">
+            <desciption>
+                <p>
+                    Version 0.4.15 is here with a tiny update for 2026.
+                </p>
+                <ul>
+                    <li>New: Show both installed and upgradable addon versions in the detail view</li>
+                    <li>Change: Update dependencies</li>
+                </ul>
+            </description>
+        </release>
         <release version="0.4.14" date="2025-12-09">
             <description>
                 <p>

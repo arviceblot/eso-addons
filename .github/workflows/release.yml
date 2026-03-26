@@ -117,7 +117,7 @@ jobs:
 
   release_and_publish:
     name: Create release and publish
-    needs: [build, build_appimage]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Get the release version from the tag
