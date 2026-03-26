@@ -10,7 +10,8 @@ use super::{
     },
 };
 // use bbcode_tagger::BBTree;
-use eframe::egui::{self, Image, ImageButton, Layout, RichText, ScrollArea, vec2};
+use eframe::egui::{self, Image, Layout, RichText, ScrollArea, vec2};
+use egui::Button;
 use eso_addons_core::service::{
     AddonService,
     result::{AddonImageResult, AddonShowDetails},
@@ -199,7 +200,13 @@ impl View for Details {
                 });
             });
             ui.horizontal(|ui| {
-                ui.label(format!("🔁 Version {}", addon.version));
+                let mut version_text = addon.version.to_string();
+                if let Some(ref installed_version) = addon.installed_version
+                    && *installed_version != addon.version
+                {
+                    version_text = format!("{} ➡ {}", installed_version, addon.version);
+                }
+                ui.label(format!("🔁 Version {}", version_text));
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     // TODO: pretty print favorite count
                     ui.label(format!(
@@ -267,7 +274,7 @@ impl View for Details {
                             ScrollArea::vertical().show(ui, |ui| {
                                 for image in self.images.value.as_ref().unwrap() {
                                     if ui
-                                        .add(ImageButton::new(
+                                        .add(Button::image(
                                             Image::new(image.thumbnail.to_owned())
                                                 .fit_to_exact_size(vec2(100.0, 100.0)),
                                         ))
