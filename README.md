@@ -1,6 +1,9 @@
 # ESO Addon Manager
 
+![Flathub Downloads](https://img.shields.io/flathub/downloads/com.arviceblot.eso-addon-manager)
+![Flathub Version](https://img.shields.io/flathub/v/com.arviceblot.eso-addon-manager)
 [![dependency status](https://deps.rs/repo/github/arviceblot/eso-addons/status.svg)](https://deps.rs/repo/github/arviceblot/eso-addons)
+[![CI](https://github.com/arviceblot/eso-addons/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/arviceblot/eso-addons/actions/workflows/rust.yml)
 
 A cross-platform, unofficial addon manager for The Elder Scrolls Online compatible with the Steam Deck.
 
@@ -22,7 +25,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 
 ### Linux
 
-The recommended install is to use the version from flathub. This has the added benefit of centralized updates.
+The recommended installation method is to use the version from flathub. This has the added benefit of centralized updates.
 
 <a href="https://flathub.org/apps/details/com.arviceblot.eso-addon-manager"><img src="https://flathub.org/assets/badges/flathub-badge-en.png" alt="Flathub" height="50"/></a>
 
