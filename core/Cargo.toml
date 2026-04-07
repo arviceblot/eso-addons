@@ -16,7 +16,7 @@ tempfile = "3.27.0"
 requestty = "0.6.3"
 colored = "3"
 walkdir = "2"
-toml = "0.9.12"
+toml = "1.1.0"
 reqwest = { version = "0.12.28", default-features = false, features = [
     "gzip",
     "json",
