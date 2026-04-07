@@ -1,6 +1,7 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Button, RichText, ScrollArea, Visuals};
+use eframe::egui::{self, Button, Color32, RichText, ScrollArea, Stroke, Visuals};
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
 use lazy_async_promise::ImmediateValuePromise;
@@ -15,6 +16,7 @@ use super::ui_helpers::{AddonResponse, AddonResponseType, PromisedValue};
 pub struct Settings {
     // opened_file: Option<PathBuf>,
     addon_dir_dialog: PromisedValue<Option<String>>,
+    clear_addons: Option<PromisedValue<()>>,
 
     minion_dialog: PromisedValue<Option<String>>,
     minion_import: Option<PromisedValue<()>>,
@@ -39,6 +41,19 @@ impl Settings {
             if let Some(path) = value {
                 service.config.addon_dir = PathBuf::from(path);
                 service.save_config();
+                // unmanage all installed addons
+                let mut promise = PromisedValue::<()>::default();
+                promise.set(service.clear_installed());
+                self.clear_addons = Some(promise);
+            }
+        }
+
+        // cleared addons
+        if self.clear_addons.is_some() {
+            self.clear_addons.as_mut().unwrap().poll();
+            if self.clear_addons.as_ref().unwrap().is_ready() {
+                self.clear_addons = None;
+                response.response_type = AddonResponseType::AddonsChanged;
             }
         }
 
@@ -139,22 +154,28 @@ impl View for Settings {
             });
             ui.add_space(5.0);
 
-            ui.label(RichText::new("Game AddOn folder Path").heading());
+            ui.label(RichText::new("Game AddOn folder").heading());
             ui.add_space(5.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    "Note: changing the addon directory will not move any previously installed addons!",
-                );
+            egui::Frame::NONE.outer_margin(5.0).inner_margin(10.0).corner_radius(10.0).stroke(Stroke::new(1.0, Color32::DARK_GRAY)).show(ui, |ui|
+            {
+                ui.label(RichText::new("ℹ NOTE").strong());
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        format!("Changing the addon folder will not move any previously installed addons! Any previously tracked addons will become unmanaged even if the folder is changed back.{}", if env::var("container").is_ok() { " Ensure the flatpak has permission for the chosen directory!"} else {""}),
+                    );
+                });
             });
+
             ui.add_space(5.0);
             ui.horizontal(|ui| {
+                let addon_path = service.get_addon_dir();
                 if self.addon_dir_dialog.is_polling() {
                     // disabled button
-                    ui.add_enabled(false, Button::new(RichText::new("🗁 Change").heading()));
-                } else if ui.button(RichText::new("🗁 Change").heading()).clicked() {
+                    ui.add_enabled(false, Button::new(RichText::new("🗁 Browse...").heading()));
+                } else if ui.button(RichText::new("🗁 Browse...").heading()).clicked() {
                     let promise = ImmediateValuePromise::new(async move {
                         let dialog = AsyncFileDialog::new()
-                            .set_directory("~/")
+                            .set_directory(addon_path)
                             .pick_folder()
                             .await;
                         if let Some(path) = dialog {
@@ -165,15 +186,7 @@ impl View for Settings {
                     self.addon_dir_dialog.set(promise);
                 }
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        service
-                            .config
-                            .addon_dir
-                            .clone()
-                            .into_os_string()
-                            .to_str()
-                            .unwrap(),
-                    );
+                    ui.label(service.get_addon_dir().to_string_lossy());
                 });
             });
             ui.add_space(5.0);
@@ -289,6 +302,7 @@ impl View for Settings {
                         });
                         self.restore_dialog.set(promise);
                 }
+                ui.hyperlink_to("Logs", eso_addons_core::config::Config::default_config_dir().to_string_lossy());
             });
             ui.add_space(5.0);
             if let Some(repo) = REPO {

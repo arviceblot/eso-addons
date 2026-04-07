@@ -5,10 +5,13 @@ use eso_addons_core::service::AddonService;
 use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::error;
 use tracing::log::info;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 use views::author::Author;
 
 mod views;
@@ -29,13 +32,21 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 async fn main() -> Result<(), eframe::Error> {
     dotenv().ok();
 
+    // init log file
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::WEEKLY)
+        .max_log_files(5)
+        .filename_prefix("eso-addons.log")
+        .build(eso_addons_core::config::Config::default_config_dir())
+        .expect("failed to initialize rolling file appender");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_test_writer()
+        .with_ansi(false)
+        .with_writer(io::stdout.and(non_blocking))
         .init();
-    // tracing_subscriber::registry()
-    //     .with(collector.clone())
-    //     .init();
 
     let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../data/icon.png")[..])
         .expect("Failed to load icon");
@@ -154,7 +165,6 @@ impl EamApp {
                 app.hm_data = Some(app.service.update_hm_data());
             }
             app.get_installed_addons();
-            app.check_missing_deps();
         }
         app
     }
@@ -168,7 +178,6 @@ impl EamApp {
             self.update.handle();
             info!("Updated addon list.");
             self.get_installed_addons();
-            self.check_missing_deps();
         }
         self.ttc_pricetable.poll();
         if self.ttc_pricetable.is_ready() {
@@ -198,6 +207,8 @@ impl EamApp {
         self.installed_addons.poll();
         if self.installed_addons.is_ready() {
             self.installed_addons.handle();
+            // check missing dependencies
+            self.check_missing_deps();
             // force sort as addons list may have updated
             self.installed_view = Installed::new()
                 .displayed_addons(self.installed_addons.value.as_ref().unwrap().to_owned());
@@ -207,6 +218,16 @@ impl EamApp {
         if self.missing_deps.is_ready() {
             self.missing_deps.handle();
             if !self.missing_deps.value.as_ref().unwrap().is_empty() {
+                // make sure installed addon name/ID map set
+                self.missing_dep.set_addons(
+                    self.installed_addons
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|x| (x.id, x.name.to_string()))
+                        .collect(),
+                );
                 // we need to resolve missing dependencies
                 self.missing_dep
                     .set_deps(self.missing_deps.value.as_ref().unwrap().to_owned());
@@ -292,8 +313,6 @@ impl EamApp {
     fn handle_addons_changed(&mut self) {
         // update installed addons
         self.get_installed_addons();
-        // check for missing dependencies
-        self.check_missing_deps();
         // update views
         self.search.reset(&mut self.service);
         self.details.reset(&mut self.service);

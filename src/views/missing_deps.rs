@@ -9,7 +9,6 @@ use super::ui_helpers::{AddonResponse, AddonResponseType};
 #[derive(Default)]
 pub struct MissingDeps {
     missing_deps: HashMap<String, MissingDepView>,
-    addon_names: Vec<String>,
     addon_map: AddonMap,
     rev_addon_map: HashMap<String, i32>,
 }
@@ -27,6 +26,14 @@ impl MissingDeps {
             .all(|x| x.ignore || x.satisfied_by.is_some())
     }
 
+    pub fn set_addons(&mut self, addon_map: AddonMap) {
+        self.addon_map = addon_map;
+        self.rev_addon_map.clear();
+        for (k, v) in self.addon_map.iter() {
+            self.rev_addon_map.insert((&v).to_string(), *k);
+        }
+    }
+
     pub fn set_deps(&mut self, deps: Vec<AddonDepOption>) {
         for dep in deps.iter() {
             let dep_view = match self.missing_deps.entry(dep.missing_dir.clone()) {
@@ -42,6 +49,8 @@ impl MissingDeps {
                     .options
                     .insert(option_id, dep.option_name.as_ref().unwrap().clone());
             }
+            // default to first option selected
+            dep_view.satisfied_by = dep_view.options.keys().next().copied();
         }
     }
     fn install_new(&mut self) -> AddonResponse {
@@ -112,9 +121,8 @@ impl View for MissingDeps {
                                 )
                                 .width(200.0)
                                 .show_ui(ui, |ui| {
-                                    for name in self.addon_names.iter() {
+                                    for (name, id) in self.rev_addon_map.iter() {
                                         let mut val = 0;
-                                        let id = self.rev_addon_map.get(name).unwrap_or(&0);
                                         ui.selectable_value(&mut val, *id, name);
                                         if val != 0 {
                                             dep_opt.satisfied_by = Some(val);

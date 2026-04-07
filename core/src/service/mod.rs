@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -5,7 +6,7 @@ use std::path::{Path, PathBuf};
 use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
 use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
-use crate::addons::{get_root_dir, Addon};
+use crate::addons::{Addon, get_root_dir};
 use crate::api::ApiClient;
 use crate::config::{self, Config, TTCRegion};
 use crate::error::{self, Result};
@@ -30,9 +31,11 @@ use sea_orm::{
     DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, Statement,
 };
-use snafu::{ensure, ResultExt};
+use snafu::{ResultExt, ensure};
 use tempfile::NamedTempFile;
 use tracing::log::{self, error, info, warn};
+use version_compare::Version;
+use walkdir::WalkDir;
 use zip::ZipArchive;
 
 mod backup;
@@ -106,11 +109,12 @@ impl AddonService {
             .await
             .context(error::DbGetSnafu)?;
 
-        if let Some(installed_entry) = installed_entry {
-            if installed_entry.version == entry.version && !update {
-                info!("Addon {} is already installed and up to date", entry.name);
-                return Ok(());
-            }
+        if let Some(installed_entry) = installed_entry
+            && installed_entry.version == entry.version
+            && !update
+        {
+            info!("Addon {} is already installed and up to date", entry.name);
+            return Ok(());
         }
 
         if update {
@@ -472,6 +476,7 @@ impl AddonService {
             // get installed dirs
             let installed_dirs = addon
                 .find_related(AddonDir::Entity)
+                .filter(AddonDir::Column::Dir.ne("")) // don't delete main AddOns dir
                 .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
@@ -481,10 +486,24 @@ impl AddonService {
                 .delete(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
+            // delete any manual dependency entities for this addon
+            ManualDependency::Entity::delete_many()
+                .filter(ManualDependency::Column::SatisfiedBy.eq(addon_id))
+                .exec(&service.db)
+                .await
+                .context(error::DbDeleteSnafu)?;
             // delete installed addon directories
             fs_delete_addon(&service.get_addon_dir(), &installed_dirs).unwrap();
             info!("Removed addon {}", addon.name);
 
+            Ok(())
+        })
+    }
+
+    pub fn clear_installed(&self) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            InstalledAddon::Entity::delete_many().exec(&db).await?;
             Ok(())
         })
     }
@@ -523,10 +542,89 @@ impl AddonService {
     }
 
     pub fn get_installed_addons(&self) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
-        // let mut return_results = vec![];
         let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
         ImmediateValuePromise::new(async move {
+            // 1. Check for untracked installed addons
+            info!("Checking for untracked addons");
+            // grab every dir under Addons/
+            let walker = WalkDir::new(addon_dir.clone())
+                .min_depth(1)
+                .max_depth(1)
+                .into_iter();
+            let addon_dirs: Vec<String> = walker
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.path().file_name().unwrap().to_str().unwrap().to_string())
+                .collect();
+            let mut addon_versions = HashMap::new();
+            for addon_dir in addon_dirs {
+                addon_versions.insert(addon_dir, "0".to_string());
+            }
+
+            // now check every txt and addon file matching the directory name to get the installed version
+            let parser = eso_addon_manifest::AddonManifestParser::default();
+            let walker = WalkDir::new(addon_dir)
+                .min_depth(2)
+                .max_depth(2)
+                .into_iter();
+            for entry in walker.filter_map(|e| e.ok()).filter(|e| {
+                e.path().is_file()
+                    && e.path().parent().unwrap().file_name().unwrap()
+                        == e.path().file_stem().unwrap()
+                    && ["txt", "addon"].contains(&e.path().extension().unwrap().to_str().unwrap())
+            }) {
+                let manifest = parser.parse(entry.path().to_str().unwrap(), None).unwrap();
+                let new_version = manifest.version.unwrap_or("0".to_string());
+                // only update to the newest found version
+                if let Some(version) = addon_versions.get(&manifest.title)
+                    && Version::from(version).unwrap() < Version::from(&new_version).unwrap()
+                {
+                    addon_versions.insert(manifest.title, new_version);
+                }
+            }
+
+            // check database for any untracked addons (not installed, AddonDir matches)
+            let db_results: Vec<(i32, String, String)> = DbAddon::Entity::find()
+                .select_only()
+                .column(DbAddon::Column::Id)
+                .column(DbAddon::Column::Name)
+                .column(AddonDir::Column::Dir)
+                .column(DbAddon::Column::Version)
+                .inner_join(AddonDir::Entity)
+                .left_join(InstalledAddon::Entity)
+                .filter(AddonDir::Column::Dir.is_in(addon_versions.keys()))
+                .filter(InstalledAddon::Column::AddonId.is_null())
+                .order_by_desc(DbAddon::Column::Id)
+                .group_by(AddonDir::Column::Dir)
+                .into_tuple()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+            let inserts: Vec<InstalledAddon::ActiveModel> = db_results
+                .iter()
+                .map(|x| InstalledAddon::ActiveModel {
+                    addon_id: ActiveValue::Set(x.0),
+                    version: ActiveValue::Set(
+                        addon_versions
+                            .get(&x.2)
+                            .unwrap_or(&"0".to_string())
+                            .to_string(),
+                    ),
+                    date: ActiveValue::Set(now.to_string()),
+                })
+                .collect();
+            // 2. insert as installed, update checks will handle the rest
+            if !inserts.is_empty() {
+                info!("Adding {} untracked addons", inserts.len());
+                InstalledAddon::Entity::insert_many(inserts)
+                    .exec(&db)
+                    .await?;
+            }
+
             info!("Getting installed addons");
+            // 3. Get the full installed set along with installed version
             let results = DbAddon::Entity::find()
                 .column_as(DbAddon::Column::Version, "version")
                 .column_as(InstalledAddon::Column::Version, "installed_version")
@@ -648,7 +746,7 @@ impl AddonService {
         self.config.save().unwrap();
     }
 
-    fn get_addon_dir(&self) -> PathBuf {
+    pub fn get_addon_dir(&self) -> PathBuf {
         self.config.addon_dir.clone()
     }
 
@@ -681,20 +779,20 @@ impl AddonService {
         r_tmpfile.rewind().unwrap();
 
         // check hash if present
-        if let Some(md5) = md5 {
-            if !md5.trim().is_empty() {
-                let mut hasher = Md5::new();
-                io::copy(&mut r_tmpfile, &mut hasher).unwrap();
-                let hash = hasher.finalize().to_vec();
-                let mut hash_string = String::new();
-                for x in hash.iter() {
-                    hash_string.push_str(format!("{x:02x}").as_str());
-                }
-                if md5 != hash_string {
-                    warn!("Expected file hash {md5}, got {hash_string}");
-                }
-                r_tmpfile.rewind().unwrap();
+        if let Some(md5) = md5
+            && !md5.trim().is_empty()
+        {
+            let mut hasher = Md5::new();
+            io::copy(&mut r_tmpfile, &mut hasher).unwrap();
+            let hash = hasher.finalize().to_vec();
+            let mut hash_string = String::new();
+            for x in hash.iter() {
+                hash_string.push_str(format!("{x:02x}").as_str());
             }
+            if md5 != hash_string {
+                warn!("Expected file hash {md5}, got {hash_string}");
+            }
+            r_tmpfile.rewind().unwrap();
         }
 
         let mut archive =
@@ -722,11 +820,11 @@ impl AddonService {
                 fs::create_dir_all(&outpath)
                     .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p)
-                            .context(error::AddonDownloadZipExtractSnafu { path: p })?;
-                    }
+                if let Some(p) = outpath.parent()
+                    && !p.exists()
+                {
+                    fs::create_dir_all(p)
+                        .context(error::AddonDownloadZipExtractSnafu { path: p })?;
                 }
                 let mut outfile =
                     fs::File::create(&outpath).context(error::AddonDownloadZipExtractSnafu {

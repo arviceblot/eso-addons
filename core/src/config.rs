@@ -164,7 +164,7 @@ impl Config {
         fs::write(&path, config_str).context(error::ConfigWriteSnafu { path: &path })?;
         Ok(())
     }
-    fn default_config_dir() -> PathBuf {
+    pub fn default_config_dir() -> PathBuf {
         dirs::config_dir().unwrap().join(EAM_DATA_DIR)
     }
     fn default_config_path() -> PathBuf {
