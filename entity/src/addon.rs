@@ -14,6 +14,7 @@ pub struct Model {
     pub author_name: Option<String>,
     pub file_info_url: Option<String>,
     pub download_total: Option<String>,
+    #[sea_orm(column_type = "Integer")]
     pub download_monthly: Option<String>,
     pub favorite_total: Option<String>,
     pub md5: Option<String>,

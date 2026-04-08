@@ -204,7 +204,9 @@ impl EamApp {
         //     self.hm_data.handle();
         // }
 
-        self.installed_addons.poll();
+        if self.update_one.is_empty() {
+            self.installed_addons.poll();
+        }
         if self.installed_addons.is_ready() {
             self.installed_addons.handle();
             // check missing dependencies
