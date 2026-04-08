@@ -1,6 +1,6 @@
 [package]
 name = "eso-addon-manager"
-version = "0.4.16"
+version = "0.4.17"
 authors = [
     "arviceblot <github@relay.arviceblot.com>",
 ]
