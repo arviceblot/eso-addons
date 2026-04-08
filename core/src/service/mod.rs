@@ -639,6 +639,7 @@ where i.addon_id is null"#,
             if !inserts.is_empty() {
                 info!("Adding {} untracked addons", inserts.len());
                 InstalledAddon::Entity::insert_many(inserts)
+                    .on_conflict_do_nothing()
                     .exec(&db)
                     .await?;
             }
