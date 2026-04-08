@@ -27,9 +27,10 @@ use lazy_async_promise::ImmediateValuePromise;
 use md5::{Digest, Md5};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, DatabaseConnection, DbBackend,
-    DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType, ModelTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, Statement,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, ConnectionTrait,
+    DatabaseConnection, DbBackend, DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType,
+    ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
+    Statement,
 };
 use snafu::{ResultExt, ensure};
 use tempfile::NamedTempFile;
@@ -585,34 +586,53 @@ impl AddonService {
             }
 
             // check database for any untracked addons (not installed, AddonDir matches)
-            let db_results: Vec<(i32, String, String)> = DbAddon::Entity::find()
-                .select_only()
-                .column(DbAddon::Column::Id)
-                .column(DbAddon::Column::Name)
-                .column(AddonDir::Column::Dir)
-                .column(DbAddon::Column::Version)
-                .inner_join(AddonDir::Entity)
-                .left_join(InstalledAddon::Entity)
-                .filter(AddonDir::Column::Dir.is_in(addon_versions.keys()))
-                .filter(InstalledAddon::Column::AddonId.is_null())
-                .order_by_desc(DbAddon::Column::Id)
-                .group_by(AddonDir::Column::Dir)
-                .into_tuple()
-                .all(&db)
+            let keys: Vec<String> = addon_versions.keys().cloned().collect();
+            let placeholders = vec!["?"; keys.len()].join(", ");
+            let sql = format!(
+                r#"SELECT
+	a.id,
+	a.name,
+	d.dir,
+	a.download_monthly
+from addon a
+inner join addon_dir d on a.id = d.addon_id
+inner join (
+SELECT
+	d.dir,
+	max(cast(a.download_monthly as int)) download_monthly
+from addon_dir d
+inner join addon a on d.addon_id = a.id
+where d.dir in ({})
+GROUP by d.dir) m on d.dir = m.dir and a.download_monthly = m.download_monthly
+left outer join installed_addon i on a.id = i.addon_id
+where i.addon_id is null"#,
+                placeholders
+            );
+
+            let db_results = db
+                .query_all(Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    &sql,
+                    keys.iter().map(|k| k.into()).collect::<Vec<_>>(),
+                ))
                 .await
-                .context(error::DbGetSnafu)?;
+                .unwrap();
             let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
             let inserts: Vec<InstalledAddon::ActiveModel> = db_results
                 .iter()
-                .map(|x| InstalledAddon::ActiveModel {
-                    addon_id: ActiveValue::Set(x.0),
-                    version: ActiveValue::Set(
-                        addon_versions
-                            .get(&x.2)
-                            .unwrap_or(&"0".to_string())
-                            .to_string(),
-                    ),
-                    date: ActiveValue::Set(now.to_string()),
+                .map(|x| {
+                    let addon_id: i32 = x.try_get_by(0).unwrap();
+                    let dir: String = x.try_get_by(2).unwrap();
+                    InstalledAddon::ActiveModel {
+                        addon_id: ActiveValue::Set(addon_id),
+                        version: ActiveValue::Set(
+                            addon_versions
+                                .get(&dir)
+                                .unwrap_or(&"0".to_string())
+                                .to_string(),
+                        ),
+                        date: ActiveValue::Set(now.to_string()),
+                    }
                 })
                 .collect();
             // 2. insert as installed, update checks will handle the rest
