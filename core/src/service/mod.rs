@@ -575,7 +575,13 @@ impl AddonService {
                         == e.path().file_stem().unwrap()
                     && ["txt", "addon"].contains(&e.path().extension().unwrap().to_str().unwrap())
             }) {
-                let manifest = parser.parse(entry.path().to_str().unwrap(), None).unwrap();
+                let manifest = match parser.parse(entry.path().to_str().unwrap(), None) {
+                    Ok(manifest) => manifest,
+                    Err(err) => {
+                        warn!("{}", err);
+                        continue;
+                    }
+                };
                 let new_version = manifest.version.unwrap_or("0".to_string());
                 // only update to the newest found version
                 if let Some(version) = addon_versions.get(&manifest.title)
