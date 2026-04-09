@@ -1933,7 +1933,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "eso-addon-manager"
-version = "0.4.17"
+version = "0.4.18"
 dependencies = [
  "dotenv",
  "eframe",
@@ -1984,9 +1984,9 @@ dependencies = [
 
 [[package]]
 name = "eso_addon_manifest"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e6e7666de9501c97c1f70ea21b5d93cdf7270b5fbf1bd308cba073e4e92cf7"
+checksum = "87a7145861475ad2acadcca665f709b715a0c6bae298b2a4cc667c9f875559ad"
 dependencies = [
  "regex",
  "thiserror 2.0.18",
