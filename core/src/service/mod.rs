@@ -743,17 +743,18 @@ where i.addon_id is null"#,
                 .left_join(InstalledAddon::Entity)
                 .left_join(GameCompat::Entity)
                 .filter(
-                    Condition::any().add(
-                        GameCompat::Column::Id
-                            .eq(0)
-                            .add(GameCompat::Column::Id.is_null()),
-                    ),
+                    Condition::any()
+                        .add(GameCompat::Column::Id.is_null())
+                        .add(GameCompat::Column::Id.eq(0)),
                 )
                 .into_model::<AddonShowDetails>()
                 .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)
                 .unwrap();
+            if result.is_none() {
+                warn!("No details found for addon: {addon_id}");
+            }
             Ok(result)
         })
     }
