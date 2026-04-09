@@ -1984,9 +1984,9 @@ dependencies = [
 
 [[package]]
 name = "eso_addon_manifest"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87a7145861475ad2acadcca665f709b715a0c6bae298b2a4cc667c9f875559ad"
+checksum = "61cd0708c4377b69e110e264fd5a4782737b30cd70111103ef8fd0614a4ae563"
 dependencies = [
  "regex",
  "thiserror 2.0.18",
