@@ -585,7 +585,8 @@ impl AddonService {
                 let new_version = manifest.version.unwrap_or("0".to_string());
                 // only update to the newest found version
                 if let Some(version) = addon_versions.get(&manifest.title)
-                    && Version::from(version).unwrap() < Version::from(&new_version).unwrap()
+                    && Version::from(version).unwrap()
+                        < Version::from(&new_version).unwrap_or(Version::from("0").unwrap())
                 {
                     addon_versions.insert(manifest.title, new_version);
                 }
