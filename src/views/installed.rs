@@ -106,9 +106,7 @@ impl Installed {
                             .unwrap_or(0),
                     )
             }),
-            Sort::Id => self
-                .displayed_addons
-                .sort_unstable_by(|a, b| a.id.cmp(&b.id)),
+            Sort::Id => self.displayed_addons.sort_unstable_by_key(|a| a.id),
         }
 
         // secondary sort, put upgradeable at top
