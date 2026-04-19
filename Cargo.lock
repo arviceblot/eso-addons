@@ -1933,7 +1933,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "eso-addon-manager"
-version = "0.4.18"
+version = "0.4.19"
 dependencies = [
  "dotenv",
  "eframe",

@@ -60,7 +60,7 @@ impl Installed {
             }),
             Sort::Name => self
                 .displayed_addons
-                .sort_unstable_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                .sort_unstable_by_key(|a| a.name.to_lowercase()),
             Sort::Updated => self
                 .displayed_addons
                 .sort_unstable_by(|a, b| a.date.cmp(&b.date)),
@@ -106,9 +106,7 @@ impl Installed {
                             .unwrap_or(0),
                     )
             }),
-            Sort::Id => self
-                .displayed_addons
-                .sort_unstable_by(|a, b| a.id.cmp(&b.id)),
+            Sort::Id => self.displayed_addons.sort_unstable_by_key(|a| a.id),
         }
 
         // secondary sort, put upgradeable at top
