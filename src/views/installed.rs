@@ -60,7 +60,7 @@ impl Installed {
             }),
             Sort::Name => self
                 .displayed_addons
-                .sort_unstable_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+                .sort_unstable_by_key(|a| a.name.to_lowercase()),
             Sort::Updated => self
                 .displayed_addons
                 .sort_unstable_by(|a, b| a.date.cmp(&b.date)),
