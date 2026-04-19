@@ -494,8 +494,14 @@ impl AddonService {
                 .await
                 .context(error::DbDeleteSnafu)?;
             // delete installed addon directories
-            fs_delete_addon(&service.get_addon_dir(), &installed_dirs).unwrap();
-            info!("Removed addon {}", addon.name);
+            match fs_delete_addon(&service.get_addon_dir(), &installed_dirs) {
+                Ok(_) => {
+                    info!("Removed addon {}", addon.name);
+                }
+                Err(err) => {
+                    warn!("{err}");
+                }
+            }
 
             Ok(())
         })
@@ -592,7 +598,7 @@ impl AddonService {
                 }
             }
 
-            // check database for any untracked addons (not installed, AddonDir matches)
+            // check database for any untracked addons (not installed, AddonDir matches, and AddonDir not installed by another)
             let keys: Vec<String> = addon_versions.keys().cloned().collect();
             let placeholders = vec!["?"; keys.len()].join(", ");
             let sql = format!(
@@ -612,7 +618,12 @@ inner join addon a on d.addon_id = a.id
 where d.dir in ({})
 GROUP by d.dir) m on d.dir = m.dir and a.download_monthly = m.download_monthly
 left outer join installed_addon i on a.id = i.addon_id
-where i.addon_id is null"#,
+where i.addon_id is null
+    and d.dir not in (
+        select d.dir
+        from addon_dir d
+        inner join installed_addon i on d.addon_id = i.addon_id
+    )"#,
                 placeholders
             );
 
