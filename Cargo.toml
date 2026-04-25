@@ -30,7 +30,7 @@ args = [
 
 [dependencies]
 eframe = "0.33.3"
-tokio = { version = "1.51.1", features = ["full"] }
+tokio = { version = "1.52.1", features = ["full"] }
 eso-addons-core = { version = "0.1.2", path = "./core" }
 strum = "0.28.0"
 strum_macros = "0.28.0"
