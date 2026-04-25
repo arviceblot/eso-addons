@@ -124,21 +124,21 @@ impl Installed {
 impl View for Installed {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
-        _ui: &mut egui::Ui,
+        _ctx: &egui::Context,
+        ui: &mut egui::Ui,
         _service: &mut AddonService,
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
 
         if self.displayed_addons.is_empty() {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.heading("No addons installed!");
                 })
             });
         } else {
             self.handle_sort();
-            egui::TopBottomPanel::top("installed_top").show(ctx, |ui| {
+            egui::Panel::top("installed_top").show_inside(ui, |ui| {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     let updateable_count = self.get_updateable_addon_count();
@@ -191,7 +191,7 @@ impl View for Installed {
                 return response;
             }
 
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 let addons: Vec<&AddonShowDetails> = self
                     .displayed_addons
                     .iter()
