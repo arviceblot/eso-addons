@@ -22,7 +22,6 @@ use entity::installed_addon as InstalledAddon;
 use entity::manual_dependency as ManualDependency;
 use migration::{Condition, Migrator, MigratorTrait};
 
-use bbcode_tagger::{BBCode, BBTree};
 use lazy_async_promise::ImmediateValuePromise;
 use md5::{Digest, Md5};
 use sea_orm::sea_query::{Expr, OnConflict};
@@ -767,14 +766,6 @@ where i.addon_id is null
             if result.is_none() {
                 warn!("No details found for addon: {addon_id}");
             }
-            Ok(result)
-        })
-    }
-
-    pub fn parse_bbcode(&self, text: String) -> ImmediateValuePromise<BBTree> {
-        ImmediateValuePromise::new(async move {
-            let parser = BBCode::default();
-            let result = parser.parse(&text);
             Ok(result)
         })
     }

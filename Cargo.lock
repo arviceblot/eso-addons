@@ -731,12 +731,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bbcode-tagger"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49d232687d86c4ff15aceb45cda3f8f5050110b12268f86b29b60e46142fa0a7"
+name = "bbcode"
+version = "0.1.0"
+
+[[package]]
+name = "bbcode-egui"
+version = "0.1.0"
 dependencies = [
- "regex",
+ "bbcode",
+ "egui",
+ "egui_extras",
 ]
 
 [[package]]
@@ -1935,6 +1939,7 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 name = "eso-addon-manager"
 version = "0.4.19"
 dependencies = [
+ "bbcode-egui",
  "dotenv",
  "eframe",
  "egui_extras",
@@ -1955,7 +1960,6 @@ dependencies = [
 name = "eso-addons-core"
 version = "0.1.2"
 dependencies = [
- "bbcode-tagger",
  "chrono",
  "colored",
  "dirs",
@@ -6432,6 +6436,17 @@ name = "toml_writer"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
+
+[[package]]
+name = "tools"
+version = "0.1.0"
+dependencies = [
+ "bbcode",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "tower"
