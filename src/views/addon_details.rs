@@ -1,22 +1,14 @@
 use super::{
     ResetView, View,
-    ui_helpers::{
-        AddonResponse,
-        AddonResponseType,
-        PromisedValue,
-        // ui_show_bbtree,
-        truncate_len,
-        ui_show_star,
-    },
+    ui_helpers::{AddonResponse, AddonResponseType, PromisedValue, truncate_len, ui_show_star},
 };
-// use bbcode_tagger::BBTree;
+use bbcode_egui::{BBState, BBView};
 use eframe::egui::{self, Image, Layout, RichText, ScrollArea, vec2};
 use egui::Button;
 use eso_addons_core::service::{
     AddonService,
     result::{AddonImageResult, AddonShowDetails},
 };
-// use tracing::info;
 
 #[derive(PartialEq, Default)]
 enum DetailView {
@@ -31,51 +23,30 @@ enum DetailView {
 pub struct Details {
     addon_id: i32,
     details: PromisedValue<Option<AddonShowDetails>>,
-    // parsed_description: PromisedValue<BBTree>,
-    // parsed_changelog: PromisedValue<BBTree>,
     view: DetailView,
-    // show_raw_text: bool,
+    show_raw_text: bool,
+    bb_description: BBState,
+    bb_changelog: BBState,
     images: PromisedValue<Vec<AddonImageResult>>,
     selected_image: String,
 }
 
 impl Details {
     fn poll(&mut self, _: &mut AddonService) {
-        // main details
         self.details.poll();
         if self.details.is_ready() {
             self.details.handle();
-
-            // if let Some(details) = self.details.value.as_ref().unwrap() {
-            // we have details, no setup parse for details and changelog if present
-            // if let Some(description) = details.description.as_ref() {
-            // info!("Parsing BBCode for addon description: {}", details.id);
-            // self.parsed_description
-            //     .set(service.parse_bbcode(description.to_string()));
-            // }
-            // if let Some(changelog) = details.change_log.as_ref() {
-            // info!("Parsing BBCode for addon changelog: {}", details.id);
-            // self.parsed_changelog
-            //     .set(service.parse_bbcode(changelog.to_string()));
-            // }
-            // }
         }
-
-        // images
         self.images.poll();
-
-        // self.parsed_description.poll();
-        // self.parsed_changelog.poll();
     }
     pub fn set_addon(&mut self, addon_id: i32, service: &mut AddonService) {
         self.addon_id = addon_id;
-        // get addon details from service
         self.details.set(service.get_addon_details(addon_id));
-        // get addon image URLs
         self.images.set(service.get_addon_images(addon_id));
-        // if we get a new addon, reset view to description
         self.view = DetailView::default();
         self.selected_image = String::default();
+        self.bb_description = BBState::default();
+        self.bb_changelog = BBState::default();
     }
 }
 impl View for Details {
@@ -240,26 +211,34 @@ impl View for Details {
                     DetailView::ChangeLog,
                     RichText::new("Change Log").heading(),
                 );
-                // ui.checkbox(&mut self.show_raw_text, "Show Unformatted Text");
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.checkbox(&mut self.show_raw_text, "Raw");
+                });
             });
             ui.add_space(5.0);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ScrollArea::vertical().show(ui, |ui| match self.view {
+            ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .show(ui, |ui| match self.view {
                 DetailView::Description => {
-                    // if self.parsed_description.is_ready() && !self.show_raw_text {
-                    //     ui_show_bbtree(ui, self.parsed_description.value.as_ref().unwrap());
-                    // } else {
-                    ui.label(addon.description.as_ref().unwrap_or(&"".to_string()));
-                    // }
+                    let empty = String::new();
+                    let text = addon.description.as_ref().unwrap_or(&empty);
+                    if self.show_raw_text {
+                        ui.label(text);
+                    } else {
+                        BBView::new(text).show(ui, &mut self.bb_description);
+                    }
                 }
                 DetailView::ChangeLog => {
-                    // if self.parsed_changelog.is_ready() && !self.show_raw_text {
-                    //     ui_show_bbtree(ui, self.parsed_changelog.value.as_ref().unwrap());
-                    // } else {
-                    ui.label(addon.change_log.as_ref().unwrap_or(&"".to_string()));
-                    // }
+                    let empty = String::new();
+                    let text = addon.change_log.as_ref().unwrap_or(&empty);
+                    if self.show_raw_text {
+                        ui.label(text);
+                    } else {
+                        BBView::new(text).show(ui, &mut self.bb_changelog);
+                    }
                 }
                 DetailView::Pictures => {
                     if self.selected_image == String::default() {
