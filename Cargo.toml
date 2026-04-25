@@ -42,4 +42,4 @@ egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
 rfd = "0.17.2"
 serde = "1.0.228"
-tracing-appender = "0.2.4"
+tracing-appender = "0.2.5"
