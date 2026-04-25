@@ -52,7 +52,7 @@ impl Details {
 impl View for Details {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
@@ -77,7 +77,7 @@ impl View for Details {
             .as_ref()
             .unwrap()
             .to_owned();
-        egui::TopBottomPanel::top("detail_top").show(ctx, |ui| {
+        egui::Panel::top("detail_top").show_inside(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 //close button
@@ -218,7 +218,7 @@ impl View for Details {
             ui.add_space(5.0);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             ScrollArea::vertical()
                 .auto_shrink([false, true])
                 .show(ui, |ui| match self.view {
@@ -247,9 +247,9 @@ impl View for Details {
                             img.image.clone_into(&mut self.selected_image);
                         }
                     }
-                    egui::SidePanel::left("image_left")
-                        .default_width(100.0)
-                        .show(ctx, |ui| {
+                    egui::Panel::left("image_left")
+                        .default_size(100.0)
+                        .show_inside(ui, |ui| {
                             ScrollArea::vertical().show(ui, |ui| {
                                 for image in self.images.value.as_ref().unwrap() {
                                     if ui
@@ -264,7 +264,7 @@ impl View for Details {
                                 }
                             });
                         });
-                    egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::CentralPanel::default().show_inside(ui, |ui| {
                         ui.centered_and_justified(|ui| {
                             if self.selected_image != String::default() {
                                 ui.add(Image::new(self.selected_image.to_owned()).shrink_to_fit());

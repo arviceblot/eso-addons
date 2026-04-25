@@ -10,5 +10,5 @@ entities = []
 
 [dependencies]
 bbcode = { path = "../bbcode", version = "0.1" }
-egui = "0.33.3"
-egui_extras = { version = "0.33.3", features = ["all_loaders"] }
+egui = "0.34.1"
+egui_extras = { version = "0.34.1", features = ["all_loaders"] }

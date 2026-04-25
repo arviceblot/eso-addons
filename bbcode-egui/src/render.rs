@@ -173,14 +173,6 @@ fn render_paragraph(ui: &mut egui::Ui, inlines: &[Inline<'_>], ctx: &mut Ctx<'_>
                 }
                 Inline::Image(url) => {
                     flush_job(ui, &mut current, &mut current_has_content);
-                    // TODO(egui_extras image MIME bug): some servers send a
-                    // parameterised Content-Type (e.g. `image/png; charset=UTF-8`).
-                    // egui_extras 0.33 ImageCrateLoader::is_supported_mime does an
-                    // exact string match against image::ImageFormat::from_mime_type,
-                    // which only knows canonical names — so the bytes load fine but
-                    // the loader returns FormatNotSupported and a red triangle is
-                    // shown. Fixed upstream in egui_extras 0.34 by stripping the
-                    // `;` parameter; revisit when we upgrade.
                     let resp = ui.add(
                         Image::new(url.as_str())
                             .fit_to_original_size(1.0)

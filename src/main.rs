@@ -122,7 +122,7 @@ impl EamApp {
                 config::Style::Dark => Visuals::dark(),
                 config::Style::System => todo!(),
             };
-            cc.egui_ctx.set_style(egui::Style {
+            cc.egui_ctx.set_global_style(egui::Style {
                 visuals: style,
                 // how URL on hyperlink hover
                 url_in_tooltip: true,
@@ -381,8 +381,9 @@ impl EamApp {
 }
 
 impl eframe::App for EamApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // gracefully handle app quit
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let ctx = &ctx;
         if ctx.input(|i| i.viewport().close_requested()) {
             self.handle_quit();
         }
@@ -391,7 +392,7 @@ impl eframe::App for EamApp {
 
         // if we are loading addons, show spinner and that's it
         if self.update.is_polling() || self.installed_addons.is_polling() {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 // ui.vertical_centered_justified(|ui| {
                 ui.centered_and_justified(|ui| {
                     ui.spinner();
@@ -403,17 +404,17 @@ impl eframe::App for EamApp {
 
         // check if need onboarding
         if self.service.config.onboard {
-            egui::CentralPanel::default().show(ctx, |ui| {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
                 self.onboard.ui(ctx, ui, &mut self.service);
             });
             return;
         }
 
-        egui::SidePanel::left("main_left")
+        egui::Panel::left("main_left")
             .resizable(true)
-            .default_width(200.0)
-            .width_range(80.0..=200.0)
-            .show(ctx, |ui| {
+            .default_size(200.0)
+            .size_range(80.0..=200.0)
+            .show_inside(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     ui.add_space(5.0);
                     ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
@@ -490,7 +491,7 @@ impl eframe::App for EamApp {
                     }
                 });
             });
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             // check if need onboarding
             if self.service.config.onboard {
                 self.onboard.ui(ctx, ui, &mut self.service);

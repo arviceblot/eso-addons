@@ -74,7 +74,7 @@ impl View for MissingDeps {
         let mut response = AddonResponse::default();
 
         // show missing deps when ready
-        egui::TopBottomPanel::top("top_panel")
+        egui::Panel::top("top_panel")
             .show_inside(ui, |ui| {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
