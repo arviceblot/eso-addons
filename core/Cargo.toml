@@ -16,13 +16,13 @@ tempfile = "3.27.0"
 requestty = "0.6.3"
 colored = "3"
 walkdir = "2"
-toml = "1.1.0"
+toml = "1.1.2"
 reqwest = { version = "0.12.28", default-features = false, features = [
     "gzip",
     "json",
     "rustls-tls",
 ] }
-tokio = { version = "1.52.1", features = ["full"] }
+tokio = { version = "1.52.2", features = ["full"] }
 snafu = { version = "0.9.0", features = ["backtrace"] }
 zip = "8.6.0"
 sea-orm = { version = "1.1.20", features = [

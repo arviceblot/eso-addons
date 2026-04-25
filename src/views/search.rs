@@ -153,7 +153,7 @@ impl Search {
 impl View for Search {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
@@ -166,7 +166,7 @@ impl View for Search {
             return response;
         }
 
-        egui::TopBottomPanel::top("search_top").show(ctx, |ui| {
+        egui::Panel::top("search_top").show_inside(ui, |ui| {
             self.handle_sort();
             ui.add_space(5.0);
             ui.horizontal(|ui| {
@@ -211,7 +211,7 @@ impl View for Search {
             self.previous_category = self.selected_category;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             if self.category_addons.is_polling() {
                 ui.spinner();
                 return;

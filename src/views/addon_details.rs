@@ -71,7 +71,7 @@ impl Details {
 impl View for Details {
     fn ui(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
@@ -87,7 +87,7 @@ impl View for Details {
             ui.label("No addon!");
             return response;
         };
-        egui::TopBottomPanel::top("detail_top").show(ctx, |ui| {
+        egui::Panel::top("detail_top").show_inside(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 //close button
@@ -218,77 +218,75 @@ impl View for Details {
             ui.add_space(5.0);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             ScrollArea::vertical()
                 .auto_shrink([false, true])
                 .show(ui, |ui| match self.view {
-                    DetailView::Description => {
-                        if self.show_raw_text {
-                            ui.label(addon.description.as_deref().unwrap_or(""));
-                        } else if let Some(view) = &self.bb_description {
-                            view.show(ui, &mut self.bb_description_state, "description");
+                DetailView::Description => {
+                    if self.show_raw_text {
+                        ui.label(addon.description.as_deref().unwrap_or(""));
+                    } else if let Some(view) = &self.bb_description {
+                        view.show(ui, &mut self.bb_description_state, "description");
+                    }
+                }
+                DetailView::ChangeLog => {
+                    if self.show_raw_text {
+                        ui.label(addon.change_log.as_deref().unwrap_or(""));
+                    } else if let Some(view) = &self.bb_changelog {
+                        view.show(ui, &mut self.bb_changelog_state, "change_log");
+                    }
+                }
+                DetailView::Pictures => {
+                    if self.selected_image == String::default() {
+                        // set selected to first image
+                        if let Some(img) = self.images.value.as_ref().unwrap().first() {
+                            img.image.clone_into(&mut self.selected_image);
                         }
                     }
-                    DetailView::ChangeLog => {
-                        if self.show_raw_text {
-                            ui.label(addon.change_log.as_deref().unwrap_or(""));
-                        } else if let Some(view) = &self.bb_changelog {
-                            view.show(ui, &mut self.bb_changelog_state, "change_log");
-                        }
-                    }
-                    DetailView::Pictures => {
-                        if self.selected_image == String::default() {
-                            // set selected to first image
-                            if let Some(img) = self.images.value.as_ref().unwrap().first() {
-                                img.image.clone_into(&mut self.selected_image);
-                            }
-                        }
-                        egui::SidePanel::left("image_left")
-                            .default_width(100.0)
-                            .show(ctx, |ui| {
-                                ScrollArea::vertical().show(ui, |ui| {
-                                    for image in self.images.value.as_ref().unwrap() {
-                                        if ui
-                                            .add(Button::image(
-                                                Image::new(image.thumbnail.to_owned())
-                                                    .fit_to_exact_size(vec2(100.0, 100.0)),
-                                            ))
-                                            .clicked()
-                                        {
-                                            image.image.clone_into(&mut self.selected_image);
-                                        }
+                    egui::Panel::left("image_left")
+                        .default_size(100.0)
+                        .show_inside(ui, |ui| {
+                            ScrollArea::vertical().show(ui, |ui| {
+                                for image in self.images.value.as_ref().unwrap() {
+                                    if ui
+                                        .add(Button::image(
+                                            Image::new(image.thumbnail.to_owned())
+                                                .fit_to_exact_size(vec2(100.0, 100.0)),
+                                        ))
+                                        .clicked()
+                                    {
+                                        image.image.clone_into(&mut self.selected_image);
                                     }
-                                });
-                            });
-                        egui::CentralPanel::default().show(ctx, |ui| {
-                            ui.centered_and_justified(|ui| {
-                                if self.selected_image != String::default() {
-                                    ui.add(
-                                        Image::new(self.selected_image.to_owned()).shrink_to_fit(),
-                                    );
                                 }
                             });
                         });
-                    }
-                    DetailView::FileInfo => {
-                        egui::Grid::new("my_grid")
-                            .num_columns(2)
-                            .spacing([40.0, 4.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                if let Some(download) = &addon.download {
-                                    ui.label("Download Link");
-                                    ui.hyperlink_to(truncate_len(download, 40), download);
-                                    ui.end_row();
-                                }
-                                if let Some(md5) = &addon.md5 {
-                                    ui.label("MD5");
-                                    ui.code(md5.as_str());
-                                    ui.end_row();
-                                }
-                            });
-                    }
-                });
+                    egui::CentralPanel::default().show_inside(ui, |ui| {
+                        ui.centered_and_justified(|ui| {
+                            if self.selected_image != String::default() {
+                                ui.add(Image::new(self.selected_image.to_owned()).shrink_to_fit());
+                            }
+                        });
+                    });
+                }
+                DetailView::FileInfo => {
+                    egui::Grid::new("my_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            if let Some(download) = &addon.download {
+                                ui.label("Download Link");
+                                ui.hyperlink_to(truncate_len(download, 40), download);
+                                ui.end_row();
+                            }
+                            if let Some(md5) = &addon.md5 {
+                                ui.label("MD5");
+                                ui.code(md5.as_str());
+                                ui.end_row();
+                            }
+                        });
+                }
+            });
         });
         response
     }
