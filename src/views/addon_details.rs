@@ -1,22 +1,14 @@
 use super::{
     ResetView, View,
-    ui_helpers::{
-        AddonResponse,
-        AddonResponseType,
-        PromisedValue,
-        // ui_show_bbtree,
-        truncate_len,
-        ui_show_star,
-    },
+    ui_helpers::{AddonResponse, AddonResponseType, PromisedValue, truncate_len, ui_show_star},
 };
-// use bbcode_tagger::BBTree;
+use bbcode_egui::{BBState, BBView};
 use eframe::egui::{self, Image, Layout, RichText, ScrollArea, vec2};
 use egui::Button;
 use eso_addons_core::service::{
     AddonService,
     result::{AddonImageResult, AddonShowDetails},
 };
-// use tracing::info;
 
 #[derive(PartialEq, Default)]
 enum DetailView {
@@ -31,51 +23,49 @@ enum DetailView {
 pub struct Details {
     addon_id: i32,
     details: PromisedValue<Option<AddonShowDetails>>,
-    // parsed_description: PromisedValue<BBTree>,
-    // parsed_changelog: PromisedValue<BBTree>,
     view: DetailView,
-    // show_raw_text: bool,
+    show_raw_text: bool,
+    bb_description: Option<BBView>,
+    bb_description_state: BBState,
+    bb_changelog: Option<BBView>,
+    bb_changelog_state: BBState,
     images: PromisedValue<Vec<AddonImageResult>>,
     selected_image: String,
 }
 
 impl Details {
     fn poll(&mut self, _: &mut AddonService) {
-        // main details
         self.details.poll();
         if self.details.is_ready() {
             self.details.handle();
-
-            // if let Some(details) = self.details.value.as_ref().unwrap() {
-            // we have details, no setup parse for details and changelog if present
-            // if let Some(description) = details.description.as_ref() {
-            // info!("Parsing BBCode for addon description: {}", details.id);
-            // self.parsed_description
-            //     .set(service.parse_bbcode(description.to_string()));
-            // }
-            // if let Some(changelog) = details.change_log.as_ref() {
-            // info!("Parsing BBCode for addon changelog: {}", details.id);
-            // self.parsed_changelog
-            //     .set(service.parse_bbcode(changelog.to_string()));
-            // }
-            // }
+            self.build_bb_views();
         }
-
-        // images
         self.images.poll();
-
-        // self.parsed_description.poll();
-        // self.parsed_changelog.poll();
     }
+
+    fn build_bb_views(&mut self) {
+        if self.bb_description.is_some() && self.bb_changelog.is_some() {
+            return;
+        }
+        let Some(Some(addon)) = self.details.value.as_ref() else {
+            return;
+        };
+        let desc = addon.description.as_deref().unwrap_or("");
+        let cl = addon.change_log.as_deref().unwrap_or("");
+        self.bb_description = Some(BBView::parse(desc));
+        self.bb_changelog = Some(BBView::parse(cl));
+    }
+
     pub fn set_addon(&mut self, addon_id: i32, service: &mut AddonService) {
         self.addon_id = addon_id;
-        // get addon details from service
         self.details.set(service.get_addon_details(addon_id));
-        // get addon image URLs
         self.images.set(service.get_addon_images(addon_id));
-        // if we get a new addon, reset view to description
         self.view = DetailView::default();
         self.selected_image = String::default();
+        self.bb_description = None;
+        self.bb_changelog = None;
+        self.bb_description_state = BBState::default();
+        self.bb_changelog_state = BBState::default();
     }
 }
 impl View for Details {
@@ -93,19 +83,10 @@ impl View for Details {
             return response;
         }
 
-        if self.details.value.as_ref().unwrap().is_none() {
+        let Some(Some(addon)) = self.details.value.as_ref() else {
             ui.label("No addon!");
             return response;
-        }
-
-        let addon = self
-            .details
-            .value
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .to_owned();
+        };
         egui::TopBottomPanel::top("detail_top").show(ctx, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
@@ -115,19 +96,13 @@ impl View for Details {
                 }
 
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    if addon.to_owned().is_upgradable() {
-                        // if self.is_updating_addon(addon.id) {
-                        //     ui.add_enabled(false, egui::Button::new("Updating..."));
-                        // } else if ui.button(RichText::new("⮉ Update").heading()).clicked() {
-                        if ui.button(RichText::new("⮉ Update").heading()).clicked() {
-                            response.addon_id = addon.id;
-                            response.response_type = AddonResponseType::Update;
-                        }
+                    if addon.is_upgradable()
+                        && ui.button(RichText::new("⮉ Update").heading()).clicked()
+                    {
+                        response.addon_id = addon.id;
+                        response.response_type = AddonResponseType::Update;
                     }
                     if !addon.installed {
-                        // if self.is_installing_addon(addon.id) {
-                        //     ui.add_enabled(false, egui::Button::new("Installing..."));
-                        // } else if ui.button(RichText::new("⮋ Install").heading()).clicked() {
                         if ui.button(RichText::new("⮋ Install").heading()).clicked() {
                             response.addon_id = addon.id;
                             response.response_type = AddonResponseType::Install
@@ -141,7 +116,6 @@ impl View for Details {
             ui.add_space(5.0);
 
             ui.horizontal(|ui| {
-                // ui.horizontal(|ui| {
                 ui.label(RichText::new(addon.name.as_str()).heading().strong());
                 if addon
                     .download_total
@@ -153,7 +127,6 @@ impl View for Details {
                 {
                     ui_show_star(ui);
                 }
-                // });
             });
             ui.add_space(5.0);
 
@@ -165,29 +138,27 @@ impl View for Details {
                     )
                     .clicked()
                 {
-                    response.author_name = addon.to_owned().author_name;
+                    response.author_name = addon.author_name.clone();
                     response.response_type = AddonResponseType::AuthorName;
                 }
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.hyperlink_to("Visit Website", addon.to_owned().file_info_url);
+                    ui.hyperlink_to("Visit Website", &addon.file_info_url);
                 });
             });
 
             ui.horizontal(|ui| {
                 // TODO: Add icon
-                ui.label(addon.to_owned().category);
+                ui.label(addon.category.as_str());
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     // TODO: pretty format date like: January 1, 2024
                     ui.label(format!("🕘 Updated {}", addon.date));
                 });
             });
             ui.horizontal(|ui| {
-                if let Some(compat_version) = addon.to_owned().game_compat_version {
-                    ui.label(format!(
-                        "⛭ {} ({}) Supported",
-                        addon.to_owned().game_compat_name.unwrap(),
-                        compat_version
-                    ));
+                if let (Some(name), Some(ver)) =
+                    (&addon.game_compat_name, &addon.game_compat_version)
+                {
+                    ui.label(format!("⛭ {name} ({ver}) Supported"));
                 } else {
                     ui.label("⛭ Unknown Version Supported");
                 }
@@ -195,12 +166,12 @@ impl View for Details {
                     // TODO: pretty print download count
                     ui.label(format!(
                         "⮋ {} Downloads",
-                        addon.to_owned().download_total.unwrap_or("".to_string())
+                        addon.download_total.as_deref().unwrap_or("")
                     ));
                 });
             });
             ui.horizontal(|ui| {
-                let mut version_text = addon.version.to_string();
+                let mut version_text = addon.version.clone();
                 if let Some(ref installed_version) = addon.installed_version
                     && *installed_version != addon.version
                 {
@@ -211,7 +182,7 @@ impl View for Details {
                     // TODO: pretty print favorite count
                     ui.label(format!(
                         "♥ {} Favorites",
-                        addon.to_owned().favorite_total.unwrap_or("".to_string())
+                        addon.favorite_total.as_deref().unwrap_or("")
                     ));
                 });
             });
@@ -240,26 +211,30 @@ impl View for Details {
                     DetailView::ChangeLog,
                     RichText::new("Change Log").heading(),
                 );
-                // ui.checkbox(&mut self.show_raw_text, "Show Unformatted Text");
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.checkbox(&mut self.show_raw_text, "Raw");
+                });
             });
             ui.add_space(5.0);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ScrollArea::vertical().show(ui, |ui| match self.view {
+            ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .show(ui, |ui| match self.view {
                 DetailView::Description => {
-                    // if self.parsed_description.is_ready() && !self.show_raw_text {
-                    //     ui_show_bbtree(ui, self.parsed_description.value.as_ref().unwrap());
-                    // } else {
-                    ui.label(addon.description.as_ref().unwrap_or(&"".to_string()));
-                    // }
+                    if self.show_raw_text {
+                        ui.label(addon.description.as_deref().unwrap_or(""));
+                    } else if let Some(view) = &self.bb_description {
+                        view.show(ui, &mut self.bb_description_state, "description");
+                    }
                 }
                 DetailView::ChangeLog => {
-                    // if self.parsed_changelog.is_ready() && !self.show_raw_text {
-                    //     ui_show_bbtree(ui, self.parsed_changelog.value.as_ref().unwrap());
-                    // } else {
-                    ui.label(addon.change_log.as_ref().unwrap_or(&"".to_string()));
-                    // }
+                    if self.show_raw_text {
+                        ui.label(addon.change_log.as_deref().unwrap_or(""));
+                    } else if let Some(view) = &self.bb_changelog {
+                        view.show(ui, &mut self.bb_changelog_state, "change_log");
+                    }
                 }
                 DetailView::Pictures => {
                     if self.selected_image == String::default() {
@@ -299,14 +274,14 @@ impl View for Details {
                         .spacing([40.0, 4.0])
                         .striped(true)
                         .show(ui, |ui| {
-                            if let Some(download) = addon.download {
+                            if let Some(download) = &addon.download {
                                 ui.label("Download Link");
-                                ui.hyperlink_to(truncate_len(&download, 40), download);
+                                ui.hyperlink_to(truncate_len(download, 40), download);
                                 ui.end_row();
                             }
-                            if let Some(md5) = addon.md5 {
+                            if let Some(md5) = &addon.md5 {
                                 ui.label("MD5");
-                                ui.code(md5);
+                                ui.code(md5.as_str());
                                 ui.end_row();
                             }
                         });
@@ -324,5 +299,7 @@ impl ResetView for Details {
         }
         // re-get details for same addon
         self.details.set(service.get_addon_details(self.addon_id));
+        self.bb_description = None;
+        self.bb_changelog = None;
     }
 }
