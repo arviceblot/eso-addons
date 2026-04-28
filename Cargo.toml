@@ -14,7 +14,7 @@ panic = 'abort'   # Abort on panic
 strip = true      # Strip symbols from binary*
 
 [workspace]
-members = [".", "core", "entity", "migration"]
+members = [".", "bbcode", "bbcode-egui", "core", "entity", "migration", "tools"]
 
 [[bin]]
 name = "eso-addon-manager"
@@ -31,6 +31,7 @@ args = [
 [dependencies]
 eframe = "0.33.3"
 tokio = { version = "1.52.1", features = ["full"] }
+bbcode-egui = { path = "./bbcode-egui", version = "0.1", features = ["entities"] }
 eso-addons-core = { version = "0.1.2", path = "./core" }
 strum = "0.28.0"
 strum_macros = "0.28.0"
@@ -42,4 +43,4 @@ egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 image = { version = "0.25", features = ["jpeg", "png"] }
 rfd = "0.17.2"
 serde = "1.0.228"
-tracing-appender = "0.2.4"
+tracing-appender = "0.2.5"

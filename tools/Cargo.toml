@@ -1,0 +1,20 @@
+[package]
+name = "tools"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bbcode = { path = "../bbcode", version = "0.1" }
+reqwest = { version = "0.12.28", default-features = false, features = [
+    "gzip",
+    "json",
+    "rustls-tls",
+] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.51.1", features = ["macros", "rt"] }
+
+[[bin]]
+name = "scan_corpus"
+path = "src/bin/scan_corpus.rs"
