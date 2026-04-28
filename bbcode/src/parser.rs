@@ -195,7 +195,11 @@ mod tests {
     #[test]
     fn list_items() {
         let d = parse("[list][*]a[*]b[/list]");
-        let list = if let Node::Element(e) = &d.children[0] { e } else { panic!() };
+        let list = if let Node::Element(e) = &d.children[0] {
+            e
+        } else {
+            panic!()
+        };
         assert!(list.is("list"));
         assert_eq!(list.children.len(), 2);
         for (i, expected) in ["a", "b"].iter().enumerate() {
@@ -258,7 +262,11 @@ mod tests {
     #[test]
     fn ul_li_aliases() {
         let d = parse("[ul][li]a[/li][li]b[/li][/ul]");
-        let list = if let Node::Element(e) = &d.children[0] { e } else { panic!() };
+        let list = if let Node::Element(e) = &d.children[0] {
+            e
+        } else {
+            panic!()
+        };
         assert!(list.is("ul"));
         assert_eq!(list.children.len(), 2);
         for (i, expected) in ["a", "b"].iter().enumerate() {
@@ -275,7 +283,11 @@ mod tests {
     #[test]
     fn ol_li_implicit_close() {
         let d = parse("[ol][li]a[li]b[/ol]");
-        let list = if let Node::Element(e) = &d.children[0] { e } else { panic!() };
+        let list = if let Node::Element(e) = &d.children[0] {
+            e
+        } else {
+            panic!()
+        };
         assert!(list.is("ol"));
         assert_eq!(list.children.len(), 2);
         for (i, expected) in ["a", "b"].iter().enumerate() {
@@ -292,7 +304,11 @@ mod tests {
     #[test]
     fn star_inside_ul() {
         let d = parse("[ul][*]a[*]b[/ul]");
-        let list = if let Node::Element(e) = &d.children[0] { e } else { panic!() };
+        let list = if let Node::Element(e) = &d.children[0] {
+            e
+        } else {
+            panic!()
+        };
         assert!(list.is("ul"));
         assert_eq!(list.children.len(), 2);
     }

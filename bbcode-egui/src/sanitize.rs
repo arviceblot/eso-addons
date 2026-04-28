@@ -69,7 +69,9 @@ pub fn sanitize_youtube_id(raw: &str) -> Option<String> {
     if s.is_empty() || s.len() > 32 {
         return None;
     }
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         Some(s.to_string())
     } else {
         None
@@ -234,15 +236,27 @@ mod tests {
 
     #[test]
     fn named_color() {
-        assert_eq!(parse_color("\"DarkOrange\""), Some(Color32::from_rgb(255, 140, 0)));
+        assert_eq!(
+            parse_color("\"DarkOrange\""),
+            Some(Color32::from_rgb(255, 140, 0))
+        );
         assert_eq!(parse_color("red"), Some(Color32::from_rgb(255, 0, 0)));
     }
 
     #[test]
     fn hex_color() {
-        assert_eq!(parse_color("#FF8800"), Some(Color32::from_rgb(0xff, 0x88, 0x00)));
-        assert_eq!(parse_color("ff8800"), Some(Color32::from_rgb(0xff, 0x88, 0x00)));
-        assert_eq!(parse_color("#abc"), Some(Color32::from_rgb(0xaa, 0xbb, 0xcc)));
+        assert_eq!(
+            parse_color("#FF8800"),
+            Some(Color32::from_rgb(0xff, 0x88, 0x00))
+        );
+        assert_eq!(
+            parse_color("ff8800"),
+            Some(Color32::from_rgb(0xff, 0x88, 0x00))
+        );
+        assert_eq!(
+            parse_color("#abc"),
+            Some(Color32::from_rgb(0xaa, 0xbb, 0xcc))
+        );
     }
 
     #[test]
@@ -273,7 +287,10 @@ mod tests {
 
     #[test]
     fn youtube_id() {
-        assert_eq!(sanitize_youtube_id("abc-DEF_123"), Some("abc-DEF_123".to_string()));
+        assert_eq!(
+            sanitize_youtube_id("abc-DEF_123"),
+            Some("abc-DEF_123".to_string())
+        );
         assert!(sanitize_youtube_id("a b").is_none());
         assert!(sanitize_youtube_id("a; rm -rf /").is_none());
     }

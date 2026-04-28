@@ -61,7 +61,13 @@ async fn fetch_cached(
     };
     if stale {
         eprintln!("fetch {url}");
-        let bytes = client.get(url).send().await?.error_for_status()?.bytes().await?;
+        let bytes = client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
         std::fs::write(path, &bytes)?;
         return Ok(bytes.to_vec());
     }
@@ -102,7 +108,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = reqwest::Client::builder()
         .gzip(true)
-        .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .build()?;
 
     let list_bytes = fetch_cached(
@@ -139,7 +149,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let doc = bbcode::parse(src);
             let mut depth = 0usize;
             for node in &doc.children {
-                count_tags(node, &item.id, &mut counts, &mut addons, &mut depth, &mut max_depth);
+                count_tags(
+                    node,
+                    &item.id,
+                    &mut counts,
+                    &mut addons,
+                    &mut depth,
+                    &mut max_depth,
+                );
             }
         }
     }

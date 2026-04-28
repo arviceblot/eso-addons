@@ -179,21 +179,27 @@ mod tests {
     #[test]
     fn quoted_attr() {
         let toks = tokenize(r#"[color="Red"]x[/color]"#);
-        assert_eq!(toks[0], Token::Open {
-            tag: "color",
-            attr: Some(r#""Red""#),
-            raw: r#"[color="Red"]"#,
-        });
+        assert_eq!(
+            toks[0],
+            Token::Open {
+                tag: "color",
+                attr: Some(r#""Red""#),
+                raw: r#"[color="Red"]"#,
+            }
+        );
     }
 
     #[test]
     fn unquoted_attr() {
         let toks = tokenize("[size=4]x[/size]");
-        assert_eq!(toks[0], Token::Open {
-            tag: "size",
-            attr: Some("4"),
-            raw: "[size=4]",
-        });
+        assert_eq!(
+            toks[0],
+            Token::Open {
+                tag: "size",
+                attr: Some("4"),
+                raw: "[size=4]",
+            }
+        );
     }
 
     #[test]
