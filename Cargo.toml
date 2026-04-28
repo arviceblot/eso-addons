@@ -29,7 +29,7 @@ args = [
 ]
 
 [dependencies]
-eframe = "0.33.3"
+eframe = "0.34.1"
 tokio = { version = "1.52.1", features = ["full"] }
 bbcode-egui = { path = "./bbcode-egui", version = "0.1", features = ["entities"] }
 eso-addons-core = { version = "0.1.2", path = "./core" }
