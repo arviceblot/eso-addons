@@ -69,11 +69,9 @@ fn render_block(ui: &mut egui::Ui, block: &Block, ctx: &mut Ctx<'_>) {
             ui.indent("bb-indent", |ui| render_blocks(ui, children, ctx));
         }
         Block::Code(text) => {
-            Frame::group(ui.style())
-                .inner_margin(6.0)
-                .show(ui, |ui| {
-                    ui.label(RichText::new(text).monospace());
-                });
+            Frame::group(ui.style()).inner_margin(6.0).show(ui, |ui| {
+                ui.label(RichText::new(text).monospace());
+            });
         }
         Block::Hidden(kind, children) => {
             let idx = ctx.spoiler_index;
@@ -100,25 +98,21 @@ fn render_block(ui: &mut egui::Ui, block: &Block, ctx: &mut Ctx<'_>) {
                     ui.indent("bb-quote", |ui| render_blocks(ui, children, ctx));
                 });
         }
-        Block::Align(halign, children) => {
-            match halign {
-                HAlign::Left => {
-                    ui.with_layout(
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| render_blocks(ui, children, ctx),
-                    );
-                }
-                HAlign::Center => {
-                    ui.vertical_centered(|ui| render_blocks(ui, children, ctx));
-                }
-                HAlign::Right => {
-                    ui.with_layout(
-                        egui::Layout::top_down(egui::Align::Max),
-                        |ui| render_blocks(ui, children, ctx),
-                    );
-                }
+        Block::Align(halign, children) => match halign {
+            HAlign::Left => {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    render_blocks(ui, children, ctx)
+                });
             }
-        }
+            HAlign::Center => {
+                ui.vertical_centered(|ui| render_blocks(ui, children, ctx));
+            }
+            HAlign::Right => {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                    render_blocks(ui, children, ctx)
+                });
+            }
+        },
     }
 }
 
@@ -181,14 +175,15 @@ fn render_paragraph(ui: &mut egui::Ui, inlines: &[Inline], ctx: &mut Ctx<'_>) {
                     // the loader returns FormatNotSupported and a red triangle is
                     // shown. Fixed upstream in egui_extras 0.34 by stripping the
                     // `;` parameter; revisit when we upgrade.
-                    let resp = ui.add(
-                        Image::new(url.as_str())
-                            .fit_to_original_size(1.0)
-                            .max_width(pane_width)
-                            .maintain_aspect_ratio(true)
-                            .sense(Sense::click()),
-                    )
-                    .on_hover_text(short_host(url));
+                    let resp = ui
+                        .add(
+                            Image::new(url.as_str())
+                                .fit_to_original_size(1.0)
+                                .max_width(pane_width)
+                                .maintain_aspect_ratio(true)
+                                .sense(Sense::click()),
+                        )
+                        .on_hover_text(short_host(url));
                     if resp.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }

@@ -49,12 +49,7 @@ pub fn build_blocks(nodes: &[Node<'_>], style: &Style) -> Vec<Block> {
     blocks
 }
 
-fn emit_node(
-    node: &Node<'_>,
-    style: &Style,
-    blocks: &mut Vec<Block>,
-    inline: &mut Vec<Inline>,
-) {
+fn emit_node(node: &Node<'_>, style: &Style, blocks: &mut Vec<Block>, inline: &mut Vec<Inline>) {
     match node {
         Node::Text(s) => inline.push(Inline::Text {
             text: decode(s).into_owned(),
@@ -64,12 +59,7 @@ fn emit_node(
     }
 }
 
-fn emit_element(
-    e: &Element<'_>,
-    style: &Style,
-    blocks: &mut Vec<Block>,
-    inline: &mut Vec<Inline>,
-) {
+fn emit_element(e: &Element<'_>, style: &Style, blocks: &mut Vec<Block>, inline: &mut Vec<Inline>) {
     let tag = e.tag.to_ascii_lowercase();
     match tag.as_str() {
         "b" => emit_inline_styled(e, style, |s| s.bold = true, blocks, inline),
@@ -99,8 +89,8 @@ fn emit_element(
 
         "list" | "ul" | "ol" => {
             flush_para(inline, blocks);
-            let ordered = tag == "ol"
-                || matches!(e.attr_value(), Some(v) if !v.is_empty() && v != "*");
+            let ordered =
+                tag == "ol" || matches!(e.attr_value(), Some(v) if !v.is_empty() && v != "*");
             let mut items: Vec<Vec<Block>> = Vec::new();
             for child in &e.children {
                 if let Node::Element(item) = child
@@ -141,7 +131,10 @@ fn emit_element(
         }
         "center" => {
             flush_para(inline, blocks);
-            blocks.push(Block::Align(HAlign::Center, build_blocks(&e.children, style)));
+            blocks.push(Block::Align(
+                HAlign::Center,
+                build_blocks(&e.children, style),
+            ));
         }
         "left" => {
             flush_para(inline, blocks);
@@ -149,7 +142,10 @@ fn emit_element(
         }
         "right" => {
             flush_para(inline, blocks);
-            blocks.push(Block::Align(HAlign::Right, build_blocks(&e.children, style)));
+            blocks.push(Block::Align(
+                HAlign::Right,
+                build_blocks(&e.children, style),
+            ));
         }
         _ => emit_passthrough(e, style, blocks, inline),
     }
@@ -202,13 +198,16 @@ fn resolve_link(s: &str, email: bool) -> Option<String> {
 }
 
 fn emit_url(e: &Element<'_>, style: &Style, inline: &mut Vec<Inline>, email: bool) {
-    let url = e.attr.and_then(|a| resolve_link(&decode(a), email)).or_else(|| {
-        if let [Node::Text(t)] = e.children.as_slice() {
-            resolve_link(&decode(t), email)
-        } else {
-            None
-        }
-    });
+    let url = e
+        .attr
+        .and_then(|a| resolve_link(&decode(a), email))
+        .or_else(|| {
+            if let [Node::Text(t)] = e.children.as_slice() {
+                resolve_link(&decode(t), email)
+            } else {
+                None
+            }
+        });
     let Some(url) = url else {
         inline.push(Inline::Text {
             text: e.raw_open.to_string(),

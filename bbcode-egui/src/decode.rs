@@ -22,10 +22,7 @@ pub fn decode(s: &str) -> Cow<'_, str> {
             i += consumed;
             continue;
         }
-        let ch = s[i..]
-            .chars()
-            .next()
-            .expect("non-empty slice has a char");
+        let ch = s[i..].chars().next().expect("non-empty slice has a char");
         if !is_dangerous(ch) {
             out.push(ch);
         }
