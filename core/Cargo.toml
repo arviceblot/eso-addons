@@ -35,6 +35,6 @@ entity = { path = "../entity" }
 tracing = "0.1.44"
 chrono = "0.4.44"
 lazy_async_promise = "0.6.0"
-md-5 = "0.10.6"
+md-5 = "0.11.0"
 version-compare = "0.2.1"
 eso_addon_manifest = "0.1.5"
