@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
@@ -813,7 +813,15 @@ where i.addon_id is null
             && !md5.trim().is_empty()
         {
             let mut hasher = Md5::new();
-            io::copy(&mut r_tmpfile, &mut hasher).unwrap();
+            let mut reader = BufReader::new(&r_tmpfile);
+            let mut buffer = [0; 8192];
+            loop {
+                let bytes_read = reader.read(&mut buffer).unwrap();
+                if bytes_read == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..bytes_read]);
+            }
             let hash = hasher.finalize().to_vec();
             let mut hash_string = String::new();
             for x in hash.iter() {
