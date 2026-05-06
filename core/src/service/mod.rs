@@ -570,16 +570,41 @@ impl AddonService {
 
             // now check every txt and addon file matching the directory name to get the installed version
             let parser = eso_addon_manifest::AddonManifestParser::default();
-            let walker = WalkDir::new(addon_dir)
+            let walker = WalkDir::new(&addon_dir)
                 .min_depth(2)
-                .max_depth(2)
+                .max_depth(4)
                 .into_iter();
+            let mut manifest_deps: HashMap<String, Vec<String>> = HashMap::new();
+            let mut nested_dirs: HashMap<String, Vec<String>> = HashMap::new();
             for entry in walker.filter_map(|e| e.ok()).filter(|e| {
                 e.path().is_file()
                     && e.path().parent().unwrap().file_name().unwrap()
                         == e.path().file_stem().unwrap()
                     && ["txt", "addon"].contains(&e.path().extension().unwrap().to_str().unwrap())
             }) {
+                let parent = entry
+                    .path()
+                    .parent()
+                    .expect("walker min_depth(2) guarantees a parent");
+                let Some(dir_name) = parent
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(String::from)
+                else {
+                    continue;
+                };
+                let stripped = entry
+                    .path()
+                    .strip_prefix(&addon_dir)
+                    .expect("walker rooted at addon_dir");
+                let Some(top_level) = stripped
+                    .components()
+                    .next()
+                    .and_then(|c| c.as_os_str().to_str())
+                    .map(String::from)
+                else {
+                    continue;
+                };
                 let manifest = match parser.parse(entry.path().to_str().unwrap(), None) {
                     Ok(manifest) => manifest,
                     Err(err) => {
@@ -587,6 +612,11 @@ impl AddonService {
                         continue;
                     }
                 };
+                if dir_name != top_level {
+                    // nested sub-addon, e.g. CombatMetrics/CombatMetricsFightData/
+                    nested_dirs.entry(top_level).or_default().push(dir_name);
+                    continue;
+                }
                 let new_version = manifest.version.unwrap_or("0".to_string());
                 // only update to the newest found version
                 if let Some(version) = addon_versions.get(&manifest.title)
@@ -594,6 +624,12 @@ impl AddonService {
                         < Version::from(&new_version).unwrap_or(Version::from("0").unwrap())
                 {
                     addon_versions.insert(manifest.title, new_version);
+                }
+                if !manifest.depends_on.is_empty() {
+                    manifest_deps.insert(
+                        dir_name,
+                        manifest.depends_on.into_iter().map(|d| d.title).collect(),
+                    );
                 }
             }
 
@@ -658,6 +694,83 @@ where i.addon_id is null
                 InstalledAddon::Entity::insert_many(inserts)
                     .exec(&db)
                     .await?;
+            }
+
+            // Register nested sub-addon dirs under the parent's addon_id. ESOUI's
+            // file list only enumerates the top-level dir, so deps targeting bundled
+            // sub-addons (e.g. CombatMetrics depending on CombatMetricsFightData)
+            // would otherwise resolve as missing.
+            if !nested_dirs.is_empty() {
+                let parent_dirs: Vec<String> = nested_dirs.keys().cloned().collect();
+                let parent_to_addon = resolve_dirs_to_addons(&db, &parent_dirs).await?;
+
+                let mut dir_inserts: Vec<AddonDir::ActiveModel> = Vec::new();
+                for (parent, subs) in nested_dirs {
+                    let Some(&addon_id) = parent_to_addon.get(&parent) else {
+                        continue;
+                    };
+                    for sub in subs {
+                        dir_inserts.push(AddonDir::ActiveModel {
+                            addon_id: ActiveValue::Set(addon_id),
+                            dir: ActiveValue::Set(sub),
+                        });
+                    }
+                }
+                if !dir_inserts.is_empty() {
+                    let result = AddonDir::Entity::insert_many(dir_inserts)
+                        .on_conflict(
+                            OnConflict::columns([AddonDir::Column::AddonId, AddonDir::Column::Dir])
+                                .do_nothing()
+                                .to_owned(),
+                        )
+                        .exec(&db)
+                        .await;
+                    check_db_result(result)?;
+                }
+            }
+
+            // p_install populates addon_dependency only on the download path, so
+            // addons installed via Minion or by hand had no dep rows. Refresh from
+            // manifests for everything we could parse.
+            if !manifest_deps.is_empty() {
+                let manifest_dirs: Vec<String> = manifest_deps.keys().cloned().collect();
+                let addon_for_dir = resolve_dirs_to_addons(&db, &manifest_dirs).await?;
+
+                let affected: Vec<i32> = addon_for_dir.values().copied().collect();
+                if !affected.is_empty() {
+                    AddonDep::Entity::delete_many()
+                        .filter(AddonDep::Column::AddonId.is_in(affected))
+                        .exec(&db)
+                        .await
+                        .context(error::DbDeleteSnafu)?;
+                }
+
+                let mut dep_inserts: Vec<AddonDep::ActiveModel> = Vec::new();
+                for (dir, deps) in manifest_deps {
+                    let Some(&addon_id) = addon_for_dir.get(&dir) else {
+                        continue;
+                    };
+                    for dep_title in deps {
+                        dep_inserts.push(AddonDep::ActiveModel {
+                            addon_id: ActiveValue::Set(addon_id),
+                            dependency_dir: ActiveValue::Set(dep_title),
+                        });
+                    }
+                }
+                if !dep_inserts.is_empty() {
+                    let result = AddonDep::Entity::insert_many(dep_inserts)
+                        .on_conflict(
+                            OnConflict::columns([
+                                AddonDep::Column::AddonId,
+                                AddonDep::Column::DependencyDir,
+                            ])
+                            .do_nothing()
+                            .to_owned(),
+                        )
+                        .exec(&db)
+                        .await;
+                    check_db_result(result)?;
+                }
             }
 
             info!("Getting installed addons");
@@ -1257,6 +1370,38 @@ where i.addon_id is null
     }
 
     // endregion
+}
+
+async fn resolve_dirs_to_addons<C: ConnectionTrait>(
+    db: &C,
+    dirs: &[String],
+) -> Result<HashMap<String, i32>> {
+    if dirs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = vec!["?"; dirs.len()].join(", ");
+    let sql = format!(
+        r#"select distinct ad.addon_id, ad.dir
+        from installed_addon i
+        inner join addon_dir ad on ad.addon_id = i.addon_id
+        where ad.dir in ({placeholders})"#
+    );
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            &sql,
+            dirs.iter().map(|k| k.into()).collect::<Vec<_>>(),
+        ))
+        .await
+        .context(error::DbGetSnafu)?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let id: i32 = row.try_get_by(0).expect("query selects addon_id as i32");
+            let dir: String = row.try_get_by(1).expect("query selects dir as text");
+            (dir, id)
+        })
+        .collect())
 }
 
 /// Use for inserts where no updates/inserts OK
