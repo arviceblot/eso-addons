@@ -739,6 +739,279 @@ where i.addon_id is null
         })
     }
 
+    pub fn get_addon_dependency_view(
+        &self,
+        addon_id: i32,
+    ) -> ImmediateValuePromise<AddonDependencyView> {
+        let db = self.db.clone();
+
+        ImmediateValuePromise::new(async move {
+            #[derive(FromQueryResult)]
+            struct DirOwner {
+                dir: String,
+                id: i32,
+                name: String,
+            }
+            #[derive(FromQueryResult)]
+            struct SuggestionRow {
+                dir: String,
+                id: i32,
+                name: String,
+            }
+
+            let dep_rows = AddonDep::Entity::find()
+                .filter(AddonDep::Column::AddonId.eq(addon_id))
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let dep_dirs: Vec<String> = dep_rows.iter().map(|r| r.dependency_dir.clone()).collect();
+
+            let dependents = AddonRef::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"select distinct a.id as id, a.name as name
+                from addon_dir my_dir
+                inner join addon_dependency adp on adp.dependency_dir = my_dir.dir
+                inner join installed_addon i on i.addon_id = adp.addon_id
+                inner join addon a on a.id = adp.addon_id
+                where my_dir.addon_id = ? and adp.addon_id <> ?
+                order by a.name"#,
+                [addon_id.into(), addon_id.into()],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+
+            let installed_addons = AddonRef::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"select a.id as id, a.name as name
+                from installed_addon i
+                inner join addon a on a.id = i.addon_id
+                order by a.name"#,
+                [],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+
+            if dep_dirs.is_empty() {
+                return Ok(AddonDependencyView {
+                    forward: vec![],
+                    dependents,
+                    installed_addons,
+                });
+            }
+
+            let manual_rows = ManualDependency::Entity::find()
+                .filter(ManualDependency::Column::AddonDir.is_in(dep_dirs.clone()))
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let satisfied_ids: Vec<i32> =
+                manual_rows.iter().filter_map(|m| m.satisfied_by).collect();
+            let satisfied_addons = if satisfied_ids.is_empty() {
+                vec![]
+            } else {
+                DbAddon::Entity::find()
+                    .filter(DbAddon::Column::Id.is_in(satisfied_ids))
+                    .all(&db)
+                    .await
+                    .context(error::DbGetSnafu)?
+            };
+            let satisfied_name_map: HashMap<i32, String> = satisfied_addons
+                .iter()
+                .map(|a| (a.id, a.name.clone()))
+                .collect();
+
+            let placeholders = vec!["?"; dep_dirs.len()].join(",");
+            let owner_sql = format!(
+                r#"select ad.dir as dir, a.id as id, a.name as name
+                from addon_dir ad
+                inner join installed_addon i on i.addon_id = ad.addon_id
+                inner join addon a on a.id = ad.addon_id
+                where ad.dir in ({placeholders})"#
+            );
+            let owner_values: Vec<sea_orm::Value> =
+                dep_dirs.iter().map(|d| d.clone().into()).collect();
+            let owner_rows = DirOwner::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                owner_sql,
+                owner_values,
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+            let installed_owner_map: HashMap<String, AddonRef> = owner_rows
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.dir,
+                        AddonRef {
+                            id: r.id,
+                            name: r.name,
+                        },
+                    )
+                })
+                .collect();
+
+            let suggestion_sql = format!(
+                r#"select ad.dir as dir, a.id as id, a.name as name
+                from addon_dir ad
+                inner join addon a on a.id = ad.addon_id
+                left outer join (
+                    select addon_id, count(*) as dir_count
+                    from addon_dir
+                    group by addon_id
+                ) dc on dc.addon_id = a.id
+                where ad.dir in ({placeholders})
+                order by ad.dir,
+                    (a.name = ad.dir) desc,
+                    coalesce(dc.dir_count, 999) asc,
+                    cast(coalesce(nullif(a.download_monthly, ''), '0') as integer) desc,
+                    cast(coalesce(nullif(a.date, ''), '0') as integer) desc"#
+            );
+            let suggestion_values: Vec<sea_orm::Value> =
+                dep_dirs.iter().map(|d| d.clone().into()).collect();
+            let suggestion_rows = SuggestionRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                suggestion_sql,
+                suggestion_values,
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+            let mut suggestion_map: HashMap<String, Vec<AddonRef>> = HashMap::new();
+            for row in suggestion_rows {
+                suggestion_map.entry(row.dir).or_default().push(AddonRef {
+                    id: row.id,
+                    name: row.name,
+                });
+            }
+
+            let forward: Vec<DepStatus> = dep_dirs
+                .iter()
+                .map(|dir| {
+                    let resolution = if let Some(owner) = installed_owner_map.get(dir) {
+                        Resolution::Installed(owner.clone())
+                    } else if let Some(manual) = manual_rows.iter().find(|m| m.addon_dir == *dir) {
+                        if manual.ignore.unwrap_or(false) {
+                            Resolution::Ignored
+                        } else if let Some(sb_id) = manual.satisfied_by {
+                            Resolution::SatisfiedBy(AddonRef {
+                                id: sb_id,
+                                name: satisfied_name_map.get(&sb_id).cloned().unwrap_or_default(),
+                            })
+                        } else {
+                            Resolution::Unresolved {
+                                suggestions: suggestion_map.remove(dir).unwrap_or_default(),
+                            }
+                        }
+                    } else {
+                        Resolution::Unresolved {
+                            suggestions: suggestion_map.remove(dir).unwrap_or_default(),
+                        }
+                    };
+                    DepStatus {
+                        dep_dir: dir.clone(),
+                        resolution,
+                    }
+                })
+                .collect();
+
+            Ok(AddonDependencyView {
+                forward,
+                dependents,
+                installed_addons,
+            })
+        })
+    }
+
+    pub fn set_dep_ignored(&self, dep_dir: String) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            ManualDependency::Entity::insert(ManualDependency::ActiveModel {
+                addon_dir: ActiveValue::Set(dep_dir),
+                ignore: ActiveValue::Set(Some(true)),
+                satisfied_by: ActiveValue::Set(None),
+            })
+            .on_conflict(
+                OnConflict::column(ManualDependency::Column::AddonDir)
+                    .update_columns([
+                        ManualDependency::Column::Ignore,
+                        ManualDependency::Column::SatisfiedBy,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&db)
+            .await
+            .context(error::DbPutSnafu)?;
+            Ok(())
+        })
+    }
+
+    pub fn set_dep_satisfied_by(
+        &self,
+        dep_dir: String,
+        addon_id: i32,
+    ) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            ManualDependency::Entity::insert(ManualDependency::ActiveModel {
+                addon_dir: ActiveValue::Set(dep_dir),
+                ignore: ActiveValue::Set(Some(false)),
+                satisfied_by: ActiveValue::Set(Some(addon_id)),
+            })
+            .on_conflict(
+                OnConflict::column(ManualDependency::Column::AddonDir)
+                    .update_columns([
+                        ManualDependency::Column::Ignore,
+                        ManualDependency::Column::SatisfiedBy,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&db)
+            .await
+            .context(error::DbPutSnafu)?;
+            Ok(())
+        })
+    }
+
+    pub fn revoke_dep_override(&self, dep_dir: String) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            ManualDependency::Entity::delete_by_id(dep_dir)
+                .exec(&db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+            Ok(())
+        })
+    }
+
+    pub fn install_dep_suggestions(&self, items: Vec<(String, i32)>) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            for (dep_dir, addon_id) in items {
+                service.p_install(addon_id, false).await?;
+                ManualDependency::Entity::insert(ManualDependency::ActiveModel {
+                    addon_dir: ActiveValue::Set(dep_dir),
+                    ignore: ActiveValue::Set(Some(false)),
+                    satisfied_by: ActiveValue::Set(Some(addon_id)),
+                })
+                .on_conflict(
+                    OnConflict::column(ManualDependency::Column::AddonDir)
+                        .update_columns([
+                            ManualDependency::Column::Ignore,
+                            ManualDependency::Column::SatisfiedBy,
+                        ])
+                        .to_owned(),
+                )
+                .exec(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
+            }
+            Ok(())
+        })
+    }
+
     pub fn get_addon_details(
         &self,
         addon_id: i32,

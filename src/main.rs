@@ -100,6 +100,8 @@ struct EamApp {
     hm_data: Option<ImmediateValuePromise<()>>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
+    /// Only auto-nav to MissingDeps when newly discovered, not on every refresh.
+    had_missing_deps: bool,
 }
 
 impl EamApp {
@@ -151,6 +153,7 @@ impl EamApp {
             hm_data: None,
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
+            had_missing_deps: false,
         };
         if app.service.config.update_on_launch {
             // check for update on init
@@ -219,8 +222,8 @@ impl EamApp {
         self.missing_deps.poll();
         if self.missing_deps.is_ready() {
             self.missing_deps.handle();
-            if !self.missing_deps.value.as_ref().unwrap().is_empty() {
-                // make sure installed addon name/ID map set
+            let has_missing = !self.missing_deps.value.as_ref().unwrap().is_empty();
+            if has_missing {
                 self.missing_dep.set_addons(
                     self.installed_addons
                         .value
@@ -230,11 +233,13 @@ impl EamApp {
                         .map(|x| (x.id, x.name.to_string()))
                         .collect(),
                 );
-                // we need to resolve missing dependencies
                 self.missing_dep
                     .set_deps(self.missing_deps.value.as_ref().unwrap().to_owned());
-                self.change_view(ViewOpt::MissingDeps);
+                if !self.had_missing_deps {
+                    self.change_view(ViewOpt::MissingDeps);
+                }
             }
+            self.had_missing_deps = has_missing;
         }
 
         // poll installing missing dependencies
