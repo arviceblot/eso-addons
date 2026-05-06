@@ -716,9 +716,19 @@ where i.addon_id is null
         )
         left outer join addon_dir ad on dependency_dir = ad.dir
         left outer join addon a on ad.addon_id = a.id
-        left outer join manual_dependency m on dependency_dir = m.addon_dir
+        left outer join (
+            select addon_id, count(*) as dir_count
+            from addon_dir
+            group by addon_id
+        ) dc on dc.addon_id = a.id
         where
-            dependency_dir not in (select addon_dir from manual_dependency)"#,
+            dependency_dir not in (select addon_dir from manual_dependency)
+        order by
+            missing_dir,
+            (a.name = dependency_dir) desc,
+            coalesce(dc.dir_count, 999) asc,
+            cast(coalesce(nullif(a.download_monthly, ''), '0') as integer) desc,
+            cast(coalesce(nullif(a.date, ''), '0') as integer) desc"#,
                 [],
             ))
             .all(&db)
