@@ -29,7 +29,7 @@ impl Author {
 impl View for Author {
     fn ui(
         &mut self,
-        ctx: &eframe::egui::Context,
+        _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
         _service: &mut AddonService,
     ) -> AddonResponse {
@@ -41,7 +41,7 @@ impl View for Author {
             return response;
         }
 
-        egui::TopBottomPanel::top("author_top").show(ctx, |ui| {
+        egui::Panel::top("author_top").show_inside(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 //close button
@@ -64,7 +64,7 @@ impl View for Author {
             return response;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let show_addons: Vec<&AddonShowDetails> =
                 self.addons.value.as_ref().unwrap().iter().collect();
             response = AddonTable::new(&show_addons).installable(true).ui(ui);

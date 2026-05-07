@@ -139,12 +139,12 @@ impl View for Settings {
             ui.horizontal(|ui| {
                 if ui.selectable_label(service.config.style == config::Style::Light, RichText::new("☀ Light").heading()).clicked() {
                     service.config.style = config::Style::Light;
-                    ctx.style_mut(|style| {
+                    ctx.global_style_mut(|style| {
                         style.visuals = Visuals::light();
                     });
                 } else if ui.selectable_label(service.config.style == config::Style::Dark, RichText::new("🌙 Dark").heading()).clicked() {
                     service.config.style = config::Style::Dark;
-                    ctx.style_mut(|style| {
+                    ctx.global_style_mut(|style| {
                         style.visuals = Visuals::dark();
                     });
                 } else if ui.selectable_label(service.config.style == config::Style::System, RichText::new("Follow System").heading()).clicked() {
@@ -323,7 +323,7 @@ impl View for Settings {
             //                 class == egui::ViewportClass::Immediate,
             //                 "This egui backend doesn't support multiple viewports"
             //             );
-            //             egui::CentralPanel::default().show(ctx, |ui| {
+            //             egui::CentralPanel::default().show_inside(ui, |ui| {
             //                 ui.add(egui_tracing::Logs::new(self.collector.clone()))
             //             });
             //         },
