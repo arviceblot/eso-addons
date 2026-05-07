@@ -290,11 +290,10 @@ impl EamApp {
     // region: View Management
 
     fn handle_addon_selected(&mut self, addon_id: i32) {
-        if self.view == ViewOpt::Details {
-            return;
-        }
         self.details.set_addon(addon_id, &mut self.service);
-        self.change_view(ViewOpt::Details);
+        if self.view != ViewOpt::Details {
+            self.change_view(ViewOpt::Details);
+        }
     }
 
     fn change_view(&mut self, view: ViewOpt) {
@@ -304,8 +303,14 @@ impl EamApp {
     }
 
     fn close_view(&mut self) {
-        // swap back to previous view
-        self.view = self.view_stack.pop().unwrap();
+        let Some(view) = self.view_stack.pop() else {
+            return;
+        };
+        if view == ViewOpt::Root {
+            self.view_stack.push(view);
+            return;
+        }
+        self.view = view;
     }
 
     // endregion
@@ -386,6 +391,10 @@ impl eframe::App for EamApp {
         let ctx = &ctx;
         if ctx.input(|i| i.viewport().close_requested()) {
             self.handle_quit();
+        }
+
+        if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Extra1)) {
+            self.close_view();
         }
 
         self.poll();
