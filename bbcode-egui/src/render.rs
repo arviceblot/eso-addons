@@ -167,14 +167,15 @@ fn render_paragraph(ui: &mut egui::Ui, inlines: &[Inline], ctx: &mut Ctx<'_>) {
                 }
                 Inline::Image(url) => {
                     flush_job(ui, &mut current, &mut current_has_content);
-                    let resp = ui.add(
-                        Image::new(url.as_str())
-                            .fit_to_original_size(1.0)
-                            .max_width(pane_width)
-                            .maintain_aspect_ratio(true)
-                            .sense(Sense::click()),
-                    )
-                    .on_hover_text(short_host(url));
+                    let resp = ui
+                        .add(
+                            Image::new(url.as_str())
+                                .fit_to_original_size(1.0)
+                                .max_width(pane_width)
+                                .maintain_aspect_ratio(true)
+                                .sense(Sense::click()),
+                        )
+                        .on_hover_text(short_host(url));
                     if resp.hovered() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
