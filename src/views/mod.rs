@@ -5,6 +5,7 @@ use self::ui_helpers::AddonResponse;
 
 pub mod addon_details;
 pub mod author;
+pub mod errors;
 pub mod installed;
 pub mod missing_deps;
 pub mod onboard;

@@ -83,9 +83,10 @@ impl ApiClient {
 
     pub async fn get_file_details(&self, id: i32) -> Result<FileDetails> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
-        let res = self.req_url::<Vec<FileDetails>>(&req_url).await.unwrap();
-        let res = res.first().cloned().unwrap();
-        Ok(res)
+        let res = self.req_url::<Vec<FileDetails>>(&req_url).await?;
+        res.into_iter()
+            .next()
+            .ok_or_else(|| error::Error::ApiEmptyResponse { url: req_url })
     }
 
     pub async fn download_file(&self, url: &str) -> Result<Response> {
@@ -100,24 +101,17 @@ impl ApiClient {
     }
 
     pub async fn get_categories(&self) -> Result<Vec<Category>> {
-        let res = self
-            .req_url::<Vec<Category>>(&self.category_list_url)
-            .await
-            .unwrap();
-        Ok(res)
+        self.req_url::<Vec<Category>>(&self.category_list_url).await
     }
 
     pub async fn get_hm_data(&self, data: String) -> Result<Response> {
         let url = "http://harvestmap.binaryvector.net:8081";
-        let res = self
-            .client
+        self.client
             .post(url)
             .body(data)
             .send()
             .await
             .context(error::ApiGetUrlSnafu { url })
-            .unwrap();
-        Ok(res)
     }
 
     async fn get_game_config(&mut self) -> Result<()> {
@@ -132,17 +126,33 @@ impl ApiClient {
 
     async fn req_url<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T> {
         info!("Requesting: {url}");
-        let res = self
+        let bytes = self
             .client
             .get(url)
             .send()
             .await
             .context(error::ApiGetUrlSnafu { url })?
-            .json::<T>()
+            .bytes()
             .await
             .context(error::ApiParseResponseSnafu { url })?;
-        Ok(res)
+
+        if let Ok(err) = serde_json::from_slice::<EsoApiError>(&bytes) {
+            return error::ApiUpstreamSnafu {
+                url,
+                message: err.error,
+            }
+            .fail();
+        }
+
+        serde_json::from_slice(&bytes).context(error::ApiDeserializeSnafu { url })
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EsoApiError {
+    #[serde(rename = "ERROR")]
+    error: String,
 }
 
 #[derive(Deserialize)]
@@ -248,12 +258,11 @@ fn convert_date<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let s: u64 = Deserialize::deserialize(deserializer)
-        .map_err(D::Error::custom)
-        .unwrap();
-    let datetime =
-        DateTime::from_timestamp_millis(s.try_into().unwrap()).expect("invalid timestamp");
-    Ok(datetime)
+    let s: u64 = Deserialize::deserialize(deserializer)?;
+    let millis: i64 = s
+        .try_into()
+        .map_err(|_| D::Error::custom("timestamp out of range"))?;
+    DateTime::from_timestamp_millis(millis).ok_or_else(|| D::Error::custom("invalid timestamp"))
 }
 
 #[derive(Deserialize)]

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
 use self::fs_util::{fs_delete_addon, fs_read_addon};
@@ -32,7 +33,7 @@ use sea_orm::{
     ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
     Statement, TransactionTrait,
 };
-use snafu::{ResultExt, ensure};
+use snafu::{OptionExt, ResultExt, ensure};
 use tempfile::NamedTempFile;
 use tracing::log::{self, error, info, warn};
 use version_compare::Version;
@@ -56,6 +57,7 @@ pub struct AddonService {
     pub api: ApiClient,
     pub config: config::Config,
     pub db: DatabaseConnection,
+    pub errors: Arc<Mutex<Vec<ErrorRecord>>>,
 }
 impl AddonService {
     pub async fn new() -> Self {
@@ -93,23 +95,59 @@ impl AddonService {
             api: client,
             config,
             db,
+            errors: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub fn record_error(&self, context: impl Into<String>, message: impl ToString) {
+        let record = ErrorRecord {
+            timestamp: chrono::Utc::now(),
+            context: context.into(),
+            message: message.to_string(),
+        };
+        error!("{}: {}", record.context, record.message);
+        if let Ok(mut errors) = self.errors.lock() {
+            errors.push(record);
+        }
+    }
+
+    pub fn errors(&self) -> Vec<ErrorRecord> {
+        self.errors.lock().map(|e| e.clone()).unwrap_or_default()
+    }
+
+    pub fn clear_errors(&self) {
+        if let Ok(mut errors) = self.errors.lock() {
+            errors.clear();
         }
     }
 
     pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
-            service.p_install(addon_id, update).await.unwrap();
+            if let Err(e) = service.p_install(addon_id, update).await {
+                let action = if update { "updating" } else { "installing" };
+                let label = service.addon_label(addon_id).await;
+                service.record_error(format!("Error {action} {label}"), e);
+            }
             Ok(())
         })
     }
+
+    /// Best-effort human-readable label for an addon, e.g. "NinjaWicca UI (#4551)".
+    /// Falls back to "addon {id}" when the name can't be looked up.
+    async fn addon_label(&self, addon_id: i32) -> String {
+        match DbAddon::Entity::find_by_id(addon_id).one(&self.db).await {
+            Ok(Some(a)) => format!("{} (#{addon_id})", a.name),
+            _ => format!("addon {addon_id}"),
+        }
+    }
     async fn p_install(&self, addon_id: i32, update: bool) -> Result<()> {
-        self.p_update_addon_details(addon_id).await.unwrap();
+        self.p_update_addon_details(addon_id).await?;
         let entry = DbAddon::Entity::find_by_id(addon_id)
             .one(&self.db)
             .await
             .context(error::DbGetSnafu)?;
-        let entry = entry.unwrap();
+        let entry = entry.context(error::AddonNotFoundSnafu { id: addon_id })?;
         let installed_entry = InstalledAddon::Entity::find_by_id(addon_id)
             .one(&self.db)
             .await
@@ -129,9 +167,11 @@ impl AddonService {
             info!("Installing addon: {addon_id}");
         }
 
-        let installed = self
-            .fs_download_addon(entry.download.as_ref().unwrap().as_str(), entry.md5)
-            .await?;
+        let download = entry
+            .download
+            .clone()
+            .context(error::AddonMissingDownloadUrlSnafu { id: addon_id })?;
+        let installed = self.fs_download_addon(&download, entry.md5).await?;
         let installed_entry = InstalledAddon::ActiveModel {
             addon_id: ActiveValue::Set(addon_id),
             version: ActiveValue::Set(entry.version.to_string()),
@@ -219,7 +259,7 @@ impl AddonService {
             service.update_categories().await?;
 
             // update addons
-            let file_list = service.api.get_file_list().await.unwrap();
+            let file_list = service.api.get_file_list().await?;
 
             let mut insert_addons = vec![];
             let mut insert_addon_dirs = vec![];
@@ -227,7 +267,13 @@ impl AddonService {
             let mut insert_imgs = vec![];
             let mut addon_ids = vec![];
             for list_item in file_list.iter() {
-                let addon_id: i32 = list_item.id.parse().unwrap();
+                let addon_id: i32 = match list_item.id.parse() {
+                    Ok(id) => id,
+                    Err(e) => {
+                        warn!("Skipping addon with non-integer id {:?}: {e}", list_item.id);
+                        continue;
+                    }
+                };
                 addon_ids.push(addon_id);
                 let addon = DbAddon::ActiveModel {
                     id: ActiveValue::Set(addon_id),
@@ -246,7 +292,7 @@ impl AddonService {
                 // AddOn Directories
                 for addon_dir in list_item.directories.iter() {
                     let addon_dir_model = AddonDir::ActiveModel {
-                        addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
+                        addon_id: ActiveValue::Set(addon_id),
                         dir: ActiveValue::Set(addon_dir.to_string()),
                     };
                     insert_addon_dirs.push(addon_dir_model);
@@ -255,9 +301,15 @@ impl AddonService {
                 // Game Compatibilty
                 if let Some(compats) = &list_item.compatibility {
                     for (index, item) in compats.iter().enumerate() {
+                        let Ok(idx) = index.try_into() else {
+                            warn!(
+                                "Skipping compat entry {index} for addon {addon_id} (index out of range)"
+                            );
+                            continue;
+                        };
                         insert_compats.push(GameCompat::ActiveModel {
-                            addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
-                            id: ActiveValue::Set(index.try_into().unwrap()),
+                            addon_id: ActiveValue::Set(addon_id),
+                            id: ActiveValue::Set(idx),
                             version: ActiveValue::Set(item.version.to_owned()),
                             name: ActiveValue::Set(item.name.to_owned()),
                         });
@@ -269,9 +321,13 @@ impl AddonService {
                 {
                     let it = thumbs.iter().zip(imgs.iter());
                     for (i, (thumb, img)) in it.enumerate() {
+                        let Ok(idx) = i.try_into() else {
+                            warn!("Skipping image {i} for addon {addon_id} (index out of range)");
+                            continue;
+                        };
                         insert_imgs.push(AddonImage::ActiveModel {
-                            addon_id: ActiveValue::Set(addon.id.to_owned().unwrap()),
-                            index: ActiveValue::Set(i.try_into().unwrap()),
+                            addon_id: ActiveValue::Set(addon_id),
+                            index: ActiveValue::Set(idx),
                             thumbnail: ActiveValue::Set(thumb.to_owned()),
                             image: ActiveValue::Set(img.to_owned()),
                         })
@@ -346,7 +402,7 @@ impl AddonService {
 
             let mut result = UpdateResult::default();
             if upgrade_all {
-                result = service.upgrade().await.unwrap();
+                result = service.upgrade().await?;
             }
             Ok(result)
         })
@@ -354,16 +410,17 @@ impl AddonService {
 
     async fn p_update_addon_details(&self, id: i32) -> Result<()> {
         // check addon_detail not present or out of date
-        let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
+        let addon = DbAddon::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)?;
         let addon_detail = AddonDetail::Entity::find_by_id(id)
             .one(&self.db)
             .await
-            .unwrap();
-        if addon.is_some()
-            && addon_detail.is_some()
-            && addon.unwrap().version == addon_detail.unwrap().version.unwrap_or_default()
+            .context(error::DbGetSnafu)?;
+        if let (Some(addon), Some(addon_detail)) = (&addon, &addon_detail)
+            && addon.version == addon_detail.version.clone().unwrap_or_default()
         {
-            // no need to update
             return Ok(());
         }
 
@@ -377,8 +434,15 @@ impl AddonService {
             version: ActiveValue::Set(Some(file_details.version)),
         };
 
-        let addon = DbAddon::Entity::find_by_id(id).one(&self.db).await.unwrap();
-        let mut active: DbAddon::ActiveModel = addon.unwrap().into_active_model();
+        let Some(addon) = DbAddon::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context(error::DbGetSnafu)?
+        else {
+            warn!("No addon found with id {id} when updating details");
+            return Ok(());
+        };
+        let mut active: DbAddon::ActiveModel = addon.into_active_model();
         active.md5 = Set(Some(file_details.md5.to_owned()));
         active.file_name = Set(Some(file_details.file_name.to_owned()));
         active.download = Set(Some(file_details.download_url.to_owned()));
@@ -403,7 +467,10 @@ impl AddonService {
     pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
-            service.p_update_addon_details(id).await.unwrap();
+            if let Err(e) = service.p_update_addon_details(id).await {
+                let label = service.addon_label(id).await;
+                service.record_error(format!("Error updating details for {label}"), e);
+            }
             Ok(())
         })
     }
@@ -414,18 +481,27 @@ impl AddonService {
         let mut insert_categories = vec![];
         let mut category_parents = vec![];
         for category in categories.iter() {
+            let Ok(cat_id) = category.id.parse() else {
+                warn!("Skipping category with non-integer id {:?}", category.id);
+                continue;
+            };
+            let file_count = category.file_count.parse().ok();
             let db_category = Category::ActiveModel {
-                id: ActiveValue::Set(category.id.parse().unwrap()),
+                id: ActiveValue::Set(cat_id),
                 title: ActiveValue::Set(category.title.to_owned()),
                 icon: ActiveValue::Set(Some(category.icon.to_owned())),
-                file_count: ActiveValue::Set(Some(category.file_count.parse().unwrap())),
+                file_count: ActiveValue::Set(file_count),
             };
             insert_categories.push(db_category);
 
             for parent_id in category.parent_ids.iter() {
+                let Ok(parent) = parent_id.parse() else {
+                    warn!("Skipping non-integer parent id {parent_id:?} for category {cat_id}");
+                    continue;
+                };
                 let db_parent = CategoryParent::ActiveModel {
-                    id: ActiveValue::Set(category.id.parse().unwrap()),
-                    parent_id: ActiveValue::Set(parent_id.parse().unwrap()),
+                    id: ActiveValue::Set(cat_id),
+                    parent_id: ActiveValue::Set(parent),
                 };
                 category_parents.push(db_parent);
             }
@@ -467,32 +543,23 @@ impl AddonService {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Removing addon with id: {addon_id}");
-            // check if valid addon ID
-            let addon = DbAddon::Entity::find_by_id(addon_id)
+            let Some(addon) = DbAddon::Entity::find_by_id(addon_id)
                 .one(&service.db)
                 .await
-                .context(error::DbGetSnafu)?;
-            match addon {
-                Some(_) => {}
-                None => {
-                    warn!("Not a valid addon ID!");
-                    return Ok(());
-                }
-            }
-            // check if installed before removing
-            let addon = addon.unwrap();
-            let installed_addon = addon
+                .context(error::DbGetSnafu)?
+            else {
+                warn!("Not a valid addon ID!");
+                return Ok(());
+            };
+            let Some(installed_addon) = addon
                 .find_related(InstalledAddon::Entity)
                 .one(&service.db)
                 .await
-                .context(error::DbGetSnafu)?;
-            match installed_addon {
-                Some(_) => {}
-                None => {
-                    error!("Addon not installed!");
-                    return Ok(());
-                }
-            }
+                .context(error::DbGetSnafu)?
+            else {
+                warn!("Addon not installed!");
+                return Ok(());
+            };
             // get installed dirs
             let installed_dirs = addon
                 .find_related(AddonDir::Entity)
@@ -500,9 +567,7 @@ impl AddonService {
                 .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
-            // delete from installed
             installed_addon
-                .unwrap()
                 .delete(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
@@ -581,7 +646,12 @@ impl AddonService {
             let addon_dirs: Vec<String> = walker
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().is_dir())
-                .map(|e| e.path().file_name().unwrap().to_str().unwrap().to_string())
+                .filter_map(|e| {
+                    e.path()
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_string())
+                })
                 .collect();
             let mut addon_versions = HashMap::new();
             for addon_dir in addon_dirs {
@@ -597,10 +667,17 @@ impl AddonService {
             let mut manifest_deps: HashMap<String, Vec<String>> = HashMap::new();
             let mut nested_dirs: HashMap<String, Vec<String>> = HashMap::new();
             for entry in walker.filter_map(|e| e.ok()).filter(|e| {
-                e.path().is_file()
-                    && e.path().parent().unwrap().file_name().unwrap()
-                        == e.path().file_stem().unwrap()
-                    && ["txt", "addon"].contains(&e.path().extension().unwrap().to_str().unwrap())
+                let path = e.path();
+                let Some(parent_name) = path.parent().and_then(|p| p.file_name()) else {
+                    return false;
+                };
+                let Some(stem) = path.file_stem() else {
+                    return false;
+                };
+                let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                    return false;
+                };
+                path.is_file() && parent_name == stem && ["txt", "addon"].contains(&ext)
             }) {
                 let parent = entry
                     .path()
@@ -625,7 +702,11 @@ impl AddonService {
                 else {
                     continue;
                 };
-                let manifest = match parser.parse(entry.path().to_str().unwrap(), None) {
+                let Some(path_str) = entry.path().to_str() else {
+                    warn!("Skipping non-UTF-8 manifest path {:?}", entry.path());
+                    continue;
+                };
+                let manifest = match parser.parse(path_str, None) {
                     Ok(manifest) => manifest,
                     Err(err) => {
                         warn!("{}", err);
@@ -638,12 +719,14 @@ impl AddonService {
                     continue;
                 }
                 let new_version = manifest.version.unwrap_or("0".to_string());
-                // only update to the newest found version
-                if let Some(version) = addon_versions.get(&manifest.title)
-                    && Version::from(version).unwrap()
-                        < Version::from(&new_version).unwrap_or(Version::from("0").unwrap())
-                {
-                    addon_versions.insert(manifest.title, new_version);
+                if let Some(version) = addon_versions.get(&manifest.title) {
+                    let current = Version::from(version);
+                    let candidate = Version::from(&new_version);
+                    if let (Some(current), Some(candidate)) = (current, candidate)
+                        && current < candidate
+                    {
+                        addon_versions.insert(manifest.title, new_version);
+                    }
                 }
                 if !manifest.depends_on.is_empty() {
                     manifest_deps.insert(
@@ -689,25 +772,23 @@ where i.addon_id is null
                     keys.iter().map(|k| k.into()).collect::<Vec<_>>(),
                 ))
                 .await
-                .unwrap();
+                .context(error::DbGetSnafu)?;
             let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
-            let inserts: Vec<InstalledAddon::ActiveModel> = db_results
-                .iter()
-                .map(|x| {
-                    let addon_id: i32 = x.try_get_by(0).unwrap();
-                    let dir: String = x.try_get_by(2).unwrap();
-                    InstalledAddon::ActiveModel {
-                        addon_id: ActiveValue::Set(addon_id),
-                        version: ActiveValue::Set(
-                            addon_versions
-                                .get(&dir)
-                                .unwrap_or(&"0".to_string())
-                                .to_string(),
-                        ),
-                        date: ActiveValue::Set(now.to_string()),
-                    }
-                })
-                .collect();
+            let mut inserts: Vec<InstalledAddon::ActiveModel> = Vec::new();
+            for x in db_results.iter() {
+                let addon_id: i32 = x.try_get_by(0).context(error::DbGetSnafu)?;
+                let dir: String = x.try_get_by(2).context(error::DbGetSnafu)?;
+                inserts.push(InstalledAddon::ActiveModel {
+                    addon_id: ActiveValue::Set(addon_id),
+                    version: ActiveValue::Set(
+                        addon_versions
+                            .get(&dir)
+                            .unwrap_or(&"0".to_string())
+                            .to_string(),
+                    ),
+                    date: ActiveValue::Set(now.to_string()),
+                });
+            }
             // 2. insert as installed, update checks will handle the rest
             if !inserts.is_empty() {
                 info!("Adding {} untracked addons", inserts.len());
@@ -866,8 +947,7 @@ where i.addon_id is null
             ))
             .all(&db)
             .await
-            .context(error::DbGetSnafu)
-            .unwrap();
+            .context(error::DbGetSnafu)?;
             Ok(results)
         })
     }
@@ -1152,7 +1232,10 @@ where i.addon_id is null
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             // check if we need to grab it, grab if needed
-            service.p_update_addon_details(addon_id).await.unwrap();
+            if let Err(e) = service.p_update_addon_details(addon_id).await {
+                let label = service.addon_label(addon_id).await;
+                service.record_error(format!("Error updating details for {label}"), e);
+            }
 
             // get the details we need
             info!("Loading addon details for id: {addon_id}");
@@ -1177,8 +1260,7 @@ where i.addon_id is null
                 .into_model::<AddonShowDetails>()
                 .one(&service.db)
                 .await
-                .context(error::DbGetSnafu)
-                .unwrap();
+                .context(error::DbGetSnafu)?;
             if result.is_none() {
                 warn!("No details found for addon: {addon_id}");
             }
@@ -1189,7 +1271,9 @@ where i.addon_id is null
     // region: Config
 
     pub fn save_config(&self) {
-        self.config.save().unwrap();
+        if let Err(e) = self.config.save() {
+            self.record_error("Saving config", e);
+        }
     }
 
     pub fn get_addon_dir(&self) -> PathBuf {
@@ -1204,16 +1288,13 @@ where i.addon_id is null
         path_addr: Option<&str>,
         md5: Option<String>,
     ) -> Result<ZipArchive<File>> {
-        let response = tokio::join!(async move {
-            self.api
-                .download_file(url)
-                .await
-                .unwrap()
-                .bytes()
-                .await
-                .unwrap()
-        })
-        .0;
+        let response = self
+            .api
+            .download_file(url)
+            .await?
+            .bytes()
+            .await
+            .context(error::ApiParseResponseSnafu { url })?;
 
         let mut tmpfile = NamedTempFile::new().context(error::AddonDownloadTmpFileSnafu)?;
         let mut r_tmpfile = tmpfile
@@ -1222,7 +1303,9 @@ where i.addon_id is null
         tmpfile
             .write_all(response.as_ref())
             .context(error::AddonDownloadTmpFileWriteSnafu)?;
-        r_tmpfile.rewind().unwrap();
+        r_tmpfile
+            .rewind()
+            .context(error::AddonDownloadTmpFileReadSnafu)?;
 
         // check hash if present
         if let Some(md5) = md5
@@ -1232,7 +1315,9 @@ where i.addon_id is null
             let mut reader = BufReader::new(&r_tmpfile);
             let mut buffer = [0; 8192];
             loop {
-                let bytes_read = reader.read(&mut buffer).unwrap();
+                let bytes_read = reader
+                    .read(&mut buffer)
+                    .context(error::AddonDownloadTmpFileReadSnafu)?;
                 if bytes_read == 0 {
                     break;
                 }
@@ -1246,7 +1331,9 @@ where i.addon_id is null
             if md5 != hash_string {
                 warn!("Expected file hash {md5}, got {hash_string}");
             }
-            r_tmpfile.rewind().unwrap();
+            r_tmpfile
+                .rewind()
+                .context(error::AddonDownloadTmpFileReadSnafu)?;
         }
 
         let mut archive =
@@ -1301,9 +1388,7 @@ where i.addon_id is null
         let addon_name = get_root_dir(&addon_name.mangled_name());
         addon_path.push(addon_name);
 
-        let addon = fs_read_addon(&addon_path);
-
-        Ok(addon.unwrap())
+        fs_read_addon(&addon_path)
     }
 
     pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
@@ -1335,19 +1420,25 @@ where i.addon_id is null
         let filepath = file.to_path_buf();
 
         ImmediateValuePromise::new(async move {
-            // Update should already be called on app init, so main addon table should be populated
-            // If called on a new database, the main addon table will be empty. As a workaround, call `update()`.
-            // self.update(false).await.unwrap();
-
-            let line = fs::read_to_string(filepath).unwrap();
-            let ids: Vec<i32> = line
-                .split(',')
-                .filter(|&x| !x.is_empty())
-                .map(|x| x.parse::<i32>().unwrap())
-                .collect();
+            let line = fs::read_to_string(&filepath)?;
+            let mut ids: Vec<i32> = Vec::new();
+            for raw in line.split(',').filter(|x| !x.is_empty()) {
+                match raw.trim().parse::<i32>() {
+                    Ok(id) => ids.push(id),
+                    Err(e) => {
+                        service.record_error(
+                            format!("Importing Minion backup {}", filepath.display()),
+                            format!("Skipping non-integer addon id {raw:?}: {e}"),
+                        );
+                    }
+                }
+            }
             // workaround for weird behavior with promise in promise, slowly install addons one at a time
             for addon_id in ids.iter() {
-                service.p_install(*addon_id, false).await.unwrap();
+                if let Err(e) = service.p_install(*addon_id, false).await {
+                    let label = service.addon_label(*addon_id).await;
+                    service.record_error(format!("Error installing {label}"), e);
+                }
             }
             Ok(())
         })
@@ -1361,15 +1452,13 @@ where i.addon_id is null
                 .into_model::<CategoryResult>()
                 .all(&db)
                 .await
-                .context(error::DbGetSnafu)
-                .unwrap();
+                .context(error::DbGetSnafu)?;
             Ok(categories)
         })
     }
     pub fn get_category_parents(&self) -> ImmediateValuePromise<Vec<ParentCategory>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
-            // select on Category instead
             let parents = Category::Entity::find()
                 .join_rev(
                     JoinType::InnerJoin,
@@ -1380,8 +1469,7 @@ where i.addon_id is null
                 .group_by(CategoryParent::Column::ParentId)
                 .all(&db)
                 .await
-                .context(error::DbGetSnafu)
-                .unwrap();
+                .context(error::DbGetSnafu)?;
             let mut results: Vec<ParentCategory> = vec![];
             for parent in parents.iter() {
                 let children = Category::Entity::find()
@@ -1393,8 +1481,7 @@ where i.addon_id is null
                     .order_by_asc(Category::Column::Id)
                     .all(&db)
                     .await
-                    .context(error::DbGetSnafu)
-                    .unwrap();
+                    .context(error::DbGetSnafu)?;
                 results.push(ParentCategory {
                     id: parent.id,
                     title: parent.title.to_string(),
@@ -1436,9 +1523,7 @@ where i.addon_id is null
                 .into_model::<AddonShowDetails>()
                 .all(&db)
                 .await
-                .context(error::DbGetSnafu)
-                .unwrap();
-            // addons.truncate(100);
+                .context(error::DbGetSnafu)?;
             Ok(addons)
         })
     }
@@ -1460,7 +1545,10 @@ where i.addon_id is null
                     // if it's in the options, it means not installed
                     if dep_opt.options.contains_key(&satisfied_by) {
                         // install addon
-                        service.p_install(satisfied_by, false).await.unwrap();
+                        if let Err(e) = service.p_install(satisfied_by, false).await {
+                            let label = service.addon_label(satisfied_by).await;
+                            service.record_error(format!("Error installing {label}"), e);
+                        }
                     }
                     dep_insert.satisfied_by = ActiveValue::Set(Some(satisfied_by));
                 }
@@ -1498,7 +1586,7 @@ where i.addon_id is null
                 .context(error::DbGetSnafu)?;
             ensure!(hmd_addon.is_some(), error::HarvestMapDataNotInstalledSnafu);
 
-            let base_dir = config.addon_dir.parent().unwrap();
+            let base_dir = config.addon_dir.parent().unwrap_or(&config.addon_dir);
             let saved_var_dir = base_dir.join("SavedVariables");
             let addon_dir = config.addon_dir.join("HarvestMapData");
             let mut empty_file = addon_dir.join("Main");
@@ -1514,33 +1602,30 @@ where i.addon_id is null
                 let sv_fn1 = saved_var_dir.join(file_name.clone());
                 let sv_fn2 = saved_var_dir.join(format!("{file_name}~"));
 
-                // if save var file exists, create backup...
                 if sv_fn1.exists() {
                     fs::copy(sv_fn1, sv_fn2.clone())?;
                 } else {
-                    // ... else, use empty table to create a placeholder
                     let file_data = format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str());
                     let mut output = File::create(sv_fn2.clone())?;
                     write!(output, "{file_data}")?;
                 }
 
-                let sv_fn2_data = fs::read_to_string(sv_fn2).unwrap();
-                let response = api.get_hm_data(sv_fn2_data).await.unwrap();
+                let sv_fn2_data = fs::read_to_string(sv_fn2)?;
+                let response = api.get_hm_data(sv_fn2_data).await?;
 
                 let mut out_file = addon_dir.join("Modules");
                 out_file.push(format!("HarvestMap{zone}"));
                 if !out_file.exists() {
-                    fs::create_dir(out_file.clone()).unwrap();
+                    fs::create_dir(out_file.clone())?;
                 }
                 out_file.push(file_name);
-                // Write to a temp file in the same directory, streaming the response
-                // body as it arrives, then atomically rename into place so the game
-                // never reads a partially-written file.
                 let out_dir = out_file.parent().unwrap();
                 let mut tmp = NamedTempFile::new_in(out_dir)?;
                 let mut stream = response.bytes_stream();
                 while let Some(chunk) = stream.next().await {
-                    tmp.write_all(&chunk.unwrap())?;
+                    let chunk =
+                        chunk.context(error::ApiParseResponseSnafu { url: "harvestmap" })?;
+                    tmp.write_all(&chunk)?;
                 }
                 tmp.persist(&out_file)
                     .map_err(|e| e.error)
@@ -1710,10 +1795,7 @@ async fn resolve_dirs_to_addons<C: ConnectionTrait>(
 /// sea_orm now returns DbErr::RecordNotInserted when no inserts
 fn check_db_result<T>(result: Result<T, DbErr>) -> Result<()> {
     match result {
-        Ok(r) => Ok(Some(r)),
-        Err(DbErr::RecordNotInserted) => Ok(None),
-        Err(e) => Err(e),
+        Ok(_) | Err(DbErr::RecordNotInserted) => Ok(()),
+        Err(e) => Err(e).context(error::DbPutSnafu),
     }
-    .unwrap();
-    Ok(())
 }

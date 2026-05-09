@@ -15,8 +15,8 @@ impl Author {
         self.author_name = author_name;
         self.get_addons(service);
     }
-    fn poll(&mut self) {
-        self.addons.poll();
+    fn poll(&mut self, service: &AddonService) {
+        self.addons.poll_recording(service, "Loading author addons");
         if self.addons.is_ready() {
             self.addons.handle();
         }
@@ -31,10 +31,10 @@ impl View for Author {
         &mut self,
         _ctx: &eframe::egui::Context,
         ui: &mut eframe::egui::Ui,
-        _service: &mut AddonService,
+        service: &mut AddonService,
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
-        self.poll();
+        self.poll(service);
 
         if self.addons.is_polling() {
             ui.spinner();
