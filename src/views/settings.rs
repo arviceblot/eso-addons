@@ -195,30 +195,63 @@ impl View for Settings {
 
             ui.label(RichText::new("Updates").heading());
             ui.add_space(5.0);
+            let mut updates_changed = false;
             ui.horizontal(|ui| {
-                ui.checkbox(&mut service.config.update_on_launch, "Check for addon updates on launch")
+                updates_changed |= ui
+                    .checkbox(
+                        &mut service.config.update_on_launch,
+                        "Check for addon updates on launch",
+                    )
+                    .changed();
             });
             ui.horizontal(|ui| {
-                egui::ComboBox::from_label("TTC Region").selected_text(format!("{:?}", service.config.ttc_region)).show_ui(ui, |ui| {
-                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::NA, "NA");
-                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::EU, "EU");
-                    ui.selectable_value(&mut service.config.ttc_region, config::TTCRegion::ALL, "All");
-                });
+                egui::ComboBox::from_label("TTC Region")
+                    .selected_text(format!("{:?}", service.config.ttc_region))
+                    .show_ui(ui, |ui| {
+                        updates_changed |= ui
+                            .selectable_value(
+                                &mut service.config.ttc_region,
+                                config::TTCRegion::NA,
+                                "NA",
+                            )
+                            .changed();
+                        updates_changed |= ui
+                            .selectable_value(
+                                &mut service.config.ttc_region,
+                                config::TTCRegion::EU,
+                                "EU",
+                            )
+                            .changed();
+                        updates_changed |= ui
+                            .selectable_value(
+                                &mut service.config.ttc_region,
+                                config::TTCRegion::ALL,
+                                "All",
+                            )
+                            .changed();
+                    });
             });
             ui.horizontal(|ui| {
-                ui.checkbox(
-                    &mut service.config.update_ttc_pricetable,
-                    "Update TTC PriceTable",
-                );
+                updates_changed |= ui
+                    .checkbox(
+                        &mut service.config.update_ttc_pricetable,
+                        "Update TTC PriceTable",
+                    )
+                    .changed();
                 ui.label("(requires TamrielTradeCentre to be installed)");
             });
             ui.horizontal(|ui| {
-                ui.checkbox(
-                    &mut service.config.update_hm_data,
-                    "Update HarvestMap data",
-                );
+                updates_changed |= ui
+                    .checkbox(
+                        &mut service.config.update_hm_data,
+                        "Update HarvestMap data",
+                    )
+                    .changed();
                 ui.label("(requires HarvestMap-Data to be installed)");
             });
+            if updates_changed {
+                service.save_config();
+            }
             ui.add_space(5.0);
             ui.separator();
             ui.add_space(5.0);
