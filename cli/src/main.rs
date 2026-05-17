@@ -1,8 +1,3 @@
-#[macro_use]
-extern crate clap;
-extern crate dirs;
-extern crate prettytable;
-
 use crate::show::ShowCommand;
 use clap::Parser;
 use colored::*;
