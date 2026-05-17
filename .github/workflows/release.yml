@@ -18,44 +18,19 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
 
-          - build: macos
-            os: macos-latest
-            target: x86_64-apple-darwin
-
           - build: windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
       fail-fast: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install Rust toolchain "${{ matrix.target }}"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
-          profile: minimal
-
-      - name: Install packages
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          sudo apt update
-          sudo apt install libssl-dev libgtk-3-dev libglib2.0-dev
+        uses: actions/checkout@v6
 
       - name: Build binary "${{ matrix.target }}"
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --verbose --target=${{ matrix.target }}
+        run: cargo build --release --target=${{ matrix.target }}
 
       - name: Test binary "${{ matrix.target }}"
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release --verbose --target=${{ matrix.target }}
+        run: cargo test --release --target=${{ matrix.target }}
 
       - name: Rename binary file
         shell: bash
@@ -65,7 +40,7 @@ jobs:
           mv "$origin" "$dest"
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: ./target/${{ matrix.target }}/release/${{ env.PROJECT_NAME }}-${{ matrix.target }}*
@@ -75,49 +50,72 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Install latest rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          default: true
-          override: true
+        uses: actions/checkout@v6
 
       - name: Install packages
         run: |
           sudo apt update
           sudo apt install zsync
-          sudo apt install libssl-dev libgtk-3-dev libglib2.0-dev
-          cargo install --git https://github.com/StratusFearMe21/cargo-appimage.git
+          cargo install cargo-appimage
 
       - name: Install appimagetool
         run: |
-          wget https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
-          chmod a+x appimagetool-x86_64.AppImage
-          ./appimagetool-x86_64.AppImage --appimage-extract
-          chmod 755 squashfs-root/usr/bin/*
-          sudo mv squashfs-root/usr/bin/* /usr/bin
-          sudo mv squashfs-root/usr/lib/appimagekit /usr/lib/appimagekit
-          sudo chmod 755 /usr/lib/appimagekit/mksquashfs
-          rm -rf squashfs-root/
-          rm appimagetool-x86_64.AppImage
+          curl -LO https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          install -m 755 appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
+          rm ./appimagetool-x86_64.AppImage
 
       - name: Build binary
-        uses: actions-rs/cargo@v1
-        with:
-          command: appimage
+        run: cargo appimage
+
+      - name: Create .zsync control files
+        run: |
+          shopt -s nullglob
+          for f in ./*.AppImage; do
+            echo "Creating zsync for $f"
+            zsyncmake "$f"
+          done
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
+          name: appimage
           path: |
             ${{ env.PROJECT_NAME }}*.AppImage
             ${{ env.PROJECT_NAME }}*.zsync
 
+  build_macos_universal:
+    name: Build macOS universal
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Ensure macOS Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Build aarch64
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Make universal binary
+        run: |
+          mkdir -p target/universal/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/${{ env.PROJECT_NAME }} \
+            target/x86_64-apple-darwin/release/${{ env.PROJECT_NAME }} \
+            -output target/universal/release/${{ env.PROJECT_NAME }}
+
+      - name: Upload macOS universal
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.PROJECT_NAME }}-macos-universal
+          path: target/universal/release/${{ env.PROJECT_NAME }}
+
   release_and_publish:
     name: Create release and publish
-    needs: build
+    needs: [build, build_appimage, build_macos_universal]
     runs-on: ubuntu-latest
     steps:
       - name: Get the release version from the tag
@@ -125,12 +123,12 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
       - name: Create Release And Publish These Artifacts
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ env.VERSION }}
           files: |
