@@ -29,7 +29,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, ConnectionTrait,
     DatabaseConnection, DbBackend, DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType,
     ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
-    Statement,
+    Statement, TransactionTrait,
 };
 use snafu::{ResultExt, ensure};
 use tempfile::NamedTempFile;
@@ -44,6 +44,11 @@ pub mod result;
 
 const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
 const TTC_EU_URL: &str = "https://eu.tamrieltradecentre.com/download/PriceTable";
+
+/// Safe upper bound for SQLite bound parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
+/// Defaults to 32766 on 3.32.0+ (bundled by libsqlite3-sys); 32000 leaves headroom.
+/// Only relevant for `IN (?, ?, ...)` clauses — row inserts run as per-row prepared statements.
+const SQLITE_MAX_VARS: usize = 32000;
 
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
@@ -274,62 +279,69 @@ impl AddonService {
 
                 insert_addons.push(addon);
             }
-            DbAddon::Entity::insert_many(insert_addons)
-                .on_conflict(
-                    OnConflict::column(DbAddon::Column::Id)
-                        .update_columns([
-                            DbAddon::Column::CategoryId,
-                            DbAddon::Column::Version,
-                            DbAddon::Column::Date,
-                            DbAddon::Column::Name,
-                            DbAddon::Column::AuthorName,
-                            DbAddon::Column::FileInfoUrl,
-                            DbAddon::Column::DownloadTotal,
-                            DbAddon::Column::DownloadMonthly,
-                            DbAddon::Column::FavoriteTotal,
-                        ])
-                        .to_owned(),
-                )
-                .exec(&service.db)
-                .await
-                .context(error::DbPutSnafu)?;
-            // delete existing addon directories in case any are removed
-            AddonDir::Entity::delete_many()
-                .filter(AddonDir::Column::AddonId.is_in(addon_ids.to_owned()))
-                .exec(&service.db)
-                .await
-                .context(error::DbDeleteSnafu)?;
-            // Add addon directories for dependency checks
-            AddonDir::Entity::insert_many(insert_addon_dirs)
-                .exec(&service.db)
-                .await
-                .context(error::DbPutSnafu)?;
+            let txn = service.db.begin().await.context(error::DbPutSnafu)?;
 
-            // Game Compatibility version
-            // delete existing entries for replacement
-            GameCompat::Entity::delete_many()
-                .filter(GameCompat::Column::AddonId.is_in(addon_ids.to_owned()))
-                .exec(&service.db)
-                .await
-                .context(error::DbDeleteSnafu)?;
-            // insert new game compatibility records
-            GameCompat::Entity::insert_many(insert_compats)
-                .exec(&service.db)
-                .await
-                .context(error::DbPutSnafu)?;
+            let addon_on_conflict = OnConflict::column(DbAddon::Column::Id)
+                .update_columns([
+                    DbAddon::Column::CategoryId,
+                    DbAddon::Column::Version,
+                    DbAddon::Column::Date,
+                    DbAddon::Column::Name,
+                    DbAddon::Column::AuthorName,
+                    DbAddon::Column::FileInfoUrl,
+                    DbAddon::Column::DownloadTotal,
+                    DbAddon::Column::DownloadMonthly,
+                    DbAddon::Column::FavoriteTotal,
+                ])
+                .to_owned();
+            for addon in insert_addons {
+                DbAddon::Entity::insert(addon)
+                    .on_conflict(addon_on_conflict.clone())
+                    .exec(&txn)
+                    .await
+                    .context(error::DbPutSnafu)?;
+            }
 
-            // AddOn Images
-            // delete existing entries for replacement
-            AddonImage::Entity::delete_many()
-                .filter(AddonImage::Column::AddonId.is_in(addon_ids))
-                .exec(&service.db)
-                .await
-                .context(error::DbDeleteSnafu)?;
-            // insert new addon image URLs
-            AddonImage::Entity::insert_many(insert_imgs)
-                .exec(&service.db)
-                .await
-                .context(error::DbPutSnafu)?;
+            // delete + re-insert dirs/compat/images for the IDs we just touched.
+            // is_in still bind-counts the IDs, so chunk to stay under SQLITE_MAX_VARS.
+            for id_chunk in addon_ids.chunks(SQLITE_MAX_VARS) {
+                AddonDir::Entity::delete_many()
+                    .filter(AddonDir::Column::AddonId.is_in(id_chunk.iter().copied()))
+                    .exec(&txn)
+                    .await
+                    .context(error::DbDeleteSnafu)?;
+                GameCompat::Entity::delete_many()
+                    .filter(GameCompat::Column::AddonId.is_in(id_chunk.iter().copied()))
+                    .exec(&txn)
+                    .await
+                    .context(error::DbDeleteSnafu)?;
+                AddonImage::Entity::delete_many()
+                    .filter(AddonImage::Column::AddonId.is_in(id_chunk.iter().copied()))
+                    .exec(&txn)
+                    .await
+                    .context(error::DbDeleteSnafu)?;
+            }
+
+            for dir in insert_addon_dirs {
+                AddonDir::Entity::insert(dir)
+                    .exec(&txn)
+                    .await
+                    .context(error::DbPutSnafu)?;
+            }
+            for compat in insert_compats {
+                GameCompat::Entity::insert(compat)
+                    .exec(&txn)
+                    .await
+                    .context(error::DbPutSnafu)?;
+            }
+            for img in insert_imgs {
+                AddonImage::Entity::insert(img)
+                    .exec(&txn)
+                    .await
+                    .context(error::DbPutSnafu)?;
+            }
+
+            txn.commit().await.context(error::DbPutSnafu)?;
 
             let mut result = UpdateResult::default();
             if upgrade_all {
@@ -417,29 +429,36 @@ impl AddonService {
                 category_parents.push(db_parent);
             }
         }
-        let result = Category::Entity::insert_many(insert_categories)
-            .on_conflict(
-                OnConflict::column(Category::Column::Id)
-                    .update_columns([
-                        Category::Column::Title,
-                        Category::Column::Icon,
-                        Category::Column::FileCount,
-                    ])
-                    .to_owned(),
-            )
-            .exec(&self.db)
-            .await;
-        check_db_result(result)?;
-        let result = CategoryParent::Entity::insert_many(category_parents)
-            .on_conflict(
-                OnConflict::columns([CategoryParent::Column::Id, CategoryParent::Column::ParentId])
-                    .do_nothing()
-                    .to_owned(),
-            )
-            .exec(&self.db)
-            .await;
-        // for some reason the ensure check for the previous Category insert result check doesn't work here
-        check_db_result(result)?;
+        let txn = self.db.begin().await.context(error::DbPutSnafu)?;
+
+        let category_on_conflict = OnConflict::column(Category::Column::Id)
+            .update_columns([
+                Category::Column::Title,
+                Category::Column::Icon,
+                Category::Column::FileCount,
+            ])
+            .to_owned();
+        for category in insert_categories {
+            let result = Category::Entity::insert(category)
+                .on_conflict(category_on_conflict.clone())
+                .exec(&txn)
+                .await;
+            check_db_result(result)?;
+        }
+
+        let parent_on_conflict =
+            OnConflict::columns([CategoryParent::Column::Id, CategoryParent::Column::ParentId])
+                .do_nothing()
+                .to_owned();
+        for parent in category_parents {
+            let result = CategoryParent::Entity::insert(parent)
+                .on_conflict(parent_on_conflict.clone())
+                .exec(&txn)
+                .await;
+            check_db_result(result)?;
+        }
+
+        txn.commit().await.context(error::DbPutSnafu)?;
         Ok(())
     }
 
