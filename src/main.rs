@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::error;
 use tracing::log::info;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::fmt::writer::MakeWriterExt;
@@ -16,6 +15,7 @@ use views::author::Author;
 
 mod views;
 use views::addon_details::Details;
+use views::errors::Errors;
 use views::installed::Installed;
 use views::missing_deps::MissingDeps;
 use views::onboard::Onboard;
@@ -88,6 +88,7 @@ struct EamApp {
     onboard: Onboard,
     missing_dep: MissingDeps,
     author_view: Author,
+    errors_view: Errors,
     /// Addon Service with async network/DB
     service: AddonService,
     /// Addon management promises
@@ -118,15 +119,14 @@ impl EamApp {
         cc.egui_ctx.set_pixels_per_point(1.0);
 
         // set theme based on save config
-        if service.config.style != config::Style::System {
-            let style = match service.config.style {
-                config::Style::Light => Visuals::light(),
-                config::Style::Dark => Visuals::dark(),
-                config::Style::System => todo!(),
-            };
+        let style = match service.config.style {
+            config::Style::Light => Some(Visuals::light()),
+            config::Style::Dark => Some(Visuals::dark()),
+            config::Style::System => None,
+        };
+        if let Some(visuals) = style {
             cc.egui_ctx.set_global_style(egui::Style {
-                visuals: style,
-                // how URL on hyperlink hover
+                visuals,
                 url_in_tooltip: true,
                 ..egui::Style::default()
             });
@@ -144,6 +144,7 @@ impl EamApp {
             onboard: Onboard::default(),
             missing_dep: MissingDeps::new(),
             author_view: Author::default(),
+            errors_view: Errors::default(),
             remove: PromisedValue::default(),
             update_one: HashMap::new(),
             install_one: HashMap::new(),
@@ -176,13 +177,15 @@ impl EamApp {
         // track if any addons have changed so we can notify other views
         let mut addons_changed = false;
 
-        self.update.poll();
+        self.update
+            .poll_recording(&self.service, "Checking for addon updates");
         if self.update.is_ready() && !self.installed_addons.is_polling() {
             self.update.handle();
             info!("Updated addon list.");
             self.get_installed_addons();
         }
-        self.ttc_pricetable.poll();
+        self.ttc_pricetable
+            .poll_recording(&self.service, "Updating TTC PriceTable");
         if self.ttc_pricetable.is_ready() {
             info!("Updated TTC PriceTable.");
             self.ttc_pricetable.handle();
@@ -195,20 +198,19 @@ impl EamApp {
                     info!("Updated HarvestMap data.");
                     self.hm_data = None;
                 }
-                ImmediateValueState::Error(_) => {
-                    // TODO: handle errors better
-                    error!("HM error!");
+                ImmediateValueState::Error(e) => {
+                    self.service.record_error("Updating HarvestMap data", &**e);
                     self.hm_data = None;
                 }
-                ImmediateValueState::Empty => todo!(),
+                ImmediateValueState::Empty => {
+                    self.hm_data = None;
+                }
             }
         }
-        // if self.hm_data.is_ready() {
-        //     self.hm_data.handle();
-        // }
 
         if self.update_one.is_empty() {
-            self.installed_addons.poll();
+            self.installed_addons
+                .poll_recording(&self.service, "Loading installed addons");
         }
         if self.installed_addons.is_ready() {
             self.installed_addons.handle();
@@ -219,7 +221,8 @@ impl EamApp {
                 .displayed_addons(self.installed_addons.value.as_ref().unwrap().to_owned());
         }
 
-        self.missing_deps.poll();
+        self.missing_deps
+            .poll_recording(&self.service, "Checking missing dependencies");
         if self.missing_deps.is_ready() {
             self.missing_deps.handle();
             let has_missing = !self.missing_deps.value.as_ref().unwrap().is_empty();
@@ -243,14 +246,15 @@ impl EamApp {
         }
 
         // poll installing missing dependencies
-        self.install_missing_deps.poll();
+        self.install_missing_deps
+            .poll_recording(&self.service, "Installing missing dependencies");
         if self.install_missing_deps.is_ready() {
             self.install_missing_deps.handle();
             addons_changed = true;
         }
 
         // remove addon poll
-        self.remove.poll();
+        self.remove.poll_recording(&self.service, "Removing addon");
         if self.remove.is_ready() {
             self.remove.handle();
             addons_changed = true;
@@ -259,7 +263,7 @@ impl EamApp {
         // update addons poll
         let mut updated_addons = vec![];
         for (addon_id, promise) in self.update_one.iter_mut() {
-            promise.poll();
+            promise.poll_recording(&self.service, &format!("Updating addon {addon_id}"));
             if promise.is_ready() {
                 updated_addons.push(addon_id.to_owned());
                 promise.handle();
@@ -267,7 +271,6 @@ impl EamApp {
                 info!("Updated addon: {addon_id}");
             }
         }
-        // let fetch_addons = !updated_addons.is_empty();
         for addon_id in updated_addons.iter() {
             self.update_one.remove(addon_id);
         }
@@ -275,14 +278,13 @@ impl EamApp {
         // install addons poll
         let mut installed_addons = vec![];
         for (addon_id, promise) in self.install_one.iter_mut() {
-            promise.poll();
+            promise.poll_recording(&self.service, &format!("Installing addon {addon_id}"));
             if promise.is_ready() {
                 installed_addons.push(addon_id.to_owned());
                 promise.handle();
                 addons_changed = true;
             }
         }
-        // let fetch_addons = !installed_addons.is_empty();
         for addon_id in installed_addons.iter() {
             self.install_one.remove(addon_id);
         }
@@ -461,6 +463,14 @@ impl eframe::App for EamApp {
                         ViewOpt::Settings,
                         RichText::new("⛭ Settings").heading(),
                     );
+                    let error_count = self.service.errors().len();
+                    if error_count > 0 {
+                        ui.selectable_value(
+                            &mut self.view,
+                            ViewOpt::Errors,
+                            RichText::new(format!("⚠ Errors ({error_count})")).heading(),
+                        );
+                    }
                     ui.selectable_value(
                         &mut self.view,
                         ViewOpt::Quit,
@@ -523,9 +533,10 @@ impl eframe::App for EamApp {
                 }
                 ViewOpt::Author => self.author_view.ui(ctx, ui, &mut self.service),
                 ViewOpt::MissingDeps => self.missing_dep.ui(ctx, ui, &mut self.service),
+                ViewOpt::Errors => self.errors_view.ui(ctx, ui, &mut self.service),
                 ViewOpt::Root => {
-                    // should not be reachable with defaults
-                    todo!();
+                    self.view = ViewOpt::Installed;
+                    AddonResponse::default()
                 }
             };
 

@@ -45,8 +45,9 @@ impl Search {
         }
     }
 
-    fn poll(&mut self) {
-        self.get_categories.poll();
+    fn poll(&mut self, service: &AddonService) {
+        self.get_categories
+            .poll_recording(service, "Loading categories");
         if self.get_categories.is_ready() {
             self.get_categories.handle();
             self.categories.clear();
@@ -55,13 +56,14 @@ impl Search {
             }
         }
 
-        self.category_addons.poll();
+        self.category_addons
+            .poll_recording(service, "Loading category addons");
         if self.category_addons.is_ready() {
             self.category_addons.handle();
             self.sort_addons();
         }
 
-        self.results.poll();
+        self.results.poll_recording(service, "Searching addons");
         if self.results.is_ready() {
             self.results.handle();
         }
@@ -159,7 +161,7 @@ impl View for Search {
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
         self.handle_init(service);
-        self.poll();
+        self.poll(service);
 
         if self.get_categories.is_polling() {
             ui.spinner();

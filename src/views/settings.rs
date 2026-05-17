@@ -34,7 +34,8 @@ impl Settings {
         // poll promises
 
         // poll change addon dir dialog
-        self.addon_dir_dialog.poll();
+        self.addon_dir_dialog
+            .poll_recording(service, "Selecting addon directory");
         if self.addon_dir_dialog.is_ready() {
             self.addon_dir_dialog.handle();
             let value = self.addon_dir_dialog.value.as_ref().unwrap();
@@ -48,22 +49,20 @@ impl Settings {
             }
         }
 
-        // cleared addons
-        if self.clear_addons.is_some() {
-            self.clear_addons.as_mut().unwrap().poll();
-            if self.clear_addons.as_ref().unwrap().is_ready() {
+        if let Some(clear_addons) = self.clear_addons.as_mut() {
+            clear_addons.poll_recording(service, "Clearing installed addons");
+            if clear_addons.is_ready() {
                 self.clear_addons = None;
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }
 
         // poll minion file dialog
-        self.minion_dialog.poll();
+        self.minion_dialog
+            .poll_recording(service, "Selecting Minion backup file");
         if self.minion_dialog.is_ready() {
             self.minion_dialog.handle();
             let value = self.minion_dialog.value.as_ref().unwrap();
-            // start import process if we got a file
-            // TODO: Consider some path checks here? Maybe not...
             if let Some(path) = value {
                 let mut promise = PromisedValue::<()>::default();
                 promise.set(service.import_minion_file(Path::new(path)));
@@ -71,18 +70,17 @@ impl Settings {
             }
         }
 
-        // poll minion import
-        if self.minion_import.is_some() {
-            self.minion_import.as_mut().unwrap().poll();
-            if self.minion_import.as_ref().unwrap().is_ready() {
-                // clear promise
+        if let Some(minion_import) = self.minion_import.as_mut() {
+            minion_import.poll_recording(service, "Importing Minion backup");
+            if minion_import.is_ready() {
                 self.minion_import = None;
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }
 
         // poll backup file dialog
-        self.backup_dialog.poll();
+        self.backup_dialog
+            .poll_recording(service, "Selecting backup file");
         if self.backup_dialog.is_ready() {
             self.backup_dialog.handle();
             let value = self.backup_dialog.value.as_ref().unwrap();
@@ -93,16 +91,16 @@ impl Settings {
             }
         }
 
-        // poll backup process
-        if self.backup_process.is_some() {
-            self.backup_process.as_mut().unwrap().poll();
-            if self.backup_process.as_ref().unwrap().is_ready() {
+        if let Some(backup_process) = self.backup_process.as_mut() {
+            backup_process.poll_recording(service, "Backing up addon data");
+            if backup_process.is_ready() {
                 self.backup_process = None;
             }
         }
 
         // poll restore file dialog
-        self.restore_dialog.poll();
+        self.restore_dialog
+            .poll_recording(service, "Selecting restore file");
         if self.restore_dialog.is_ready() {
             self.restore_dialog.handle();
             let value = self.restore_dialog.value.as_ref().unwrap();
@@ -113,12 +111,10 @@ impl Settings {
             }
         }
 
-        // poll restore process
-        if self.restore_process.is_some() {
-            self.restore_process.as_mut().unwrap().poll();
-            if self.restore_process.as_ref().unwrap().is_ready() {
+        if let Some(restore_process) = self.restore_process.as_mut() {
+            restore_process.poll_recording(service, "Restoring addon data");
+            if restore_process.is_ready() {
                 self.restore_process = None;
-                // addons have changed, notify appropriately
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }

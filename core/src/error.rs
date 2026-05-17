@@ -51,8 +51,17 @@ pub enum Error {
     #[snafu(display("Error parsing response from url {}: {}", url, source))]
     ApiParseResponse { source: reqwest::Error, url: String },
 
-    #[snafu(display("Error deserializing response: {}", source))]
-    ApiDeserialize { source: serde_json::Error },
+    #[snafu(display("Empty response from url {}", url))]
+    ApiEmptyResponse { url: String },
+
+    #[snafu(display("Error deserializing response from url {}: {}", url, source))]
+    ApiDeserialize {
+        source: serde_json::Error,
+        url: String,
+    },
+
+    #[snafu(display("AddOn site returned error '{}' for url {}", message, url))]
+    ApiUpstream { url: String, message: String },
 
     #[snafu(display("Error with addon directory metadata {}: {}", dir.display(), source))]
     AddonDirMetadata { source: io::Error, dir: PathBuf },
@@ -101,6 +110,12 @@ pub enum Error {
 
     #[snafu(display("HarvestMap-Data needs to be installed before updating pin data"))]
     HarvestMapDataNotInstalled,
+
+    #[snafu(display("Addon {} not found", id))]
+    AddonNotFound { id: i32 },
+
+    #[snafu(display("Addon {} has no download URL", id))]
+    AddonMissingDownloadUrl { id: i32 },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

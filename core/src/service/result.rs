@@ -1,8 +1,16 @@
+use chrono::{DateTime, Utc};
 use entity::addon as DbAddon;
 use entity::category::Model as Category;
 use sea_orm::FromQueryResult;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct ErrorRecord {
+    pub timestamp: DateTime<Utc>,
+    pub context: String,
+    pub message: String,
+}
 
 pub type AddonMap = HashMap<i32, String>;
 

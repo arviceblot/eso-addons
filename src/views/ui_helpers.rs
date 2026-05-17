@@ -1,5 +1,4 @@
 use std::fmt;
-use tracing::log::error;
 
 use eframe::{
     egui::{
@@ -9,6 +8,7 @@ use eframe::{
     },
     epaint::Color32,
 };
+use eso_addons_core::service::AddonService;
 use eso_addons_core::service::result::{AddonShowDetails, MissingDepView};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use strum_macros::EnumIter;
@@ -51,6 +51,7 @@ pub enum ViewOpt {
     Author,
     Settings,
     Details,
+    Errors,
     Quit,
 }
 
@@ -58,6 +59,7 @@ pub enum ViewOpt {
 pub struct PromisedValue<T: Send + Clone + Default + 'static> {
     promise: Option<ImmediateValuePromise<T>>,
     pub value: Option<T>,
+    error: Option<String>,
     handled: bool,
 }
 impl<T: Send + Clone + Default> PromisedValue<T> {
@@ -66,26 +68,28 @@ impl<T: Send + Clone + Default> PromisedValue<T> {
             return;
         }
         let state = self.promise.as_mut().unwrap().poll_state();
-        // TODO: Strongly consider saving error here if not in progress or success
         match state {
             ImmediateValueState::Success(state) => {
-                self.value = Some(state.clone()); // copy out of promise
+                self.value = Some(state.clone());
                 self.promise = None;
             }
             ImmediateValueState::Error(e) => {
-                error!("Error fetching data: {}", **e);
+                self.error = Some(format!("{}", **e));
                 self.promise = None;
             }
             _ => {}
         }
-        // if let ImmediateValueState::Success(val) = state {
-        //     self.value = Some(val.clone()); // copy out of promise
-        //     self.promise = None;
-        // }
+    }
+    pub fn poll_recording(&mut self, service: &AddonService, context: &str) {
+        self.poll();
+        if let Some(err) = self.error.take() {
+            service.record_error(context.to_string(), err);
+        }
     }
     pub fn set(&mut self, value_promise: ImmediateValuePromise<T>) {
         self.promise = Some(value_promise);
         self.value = None;
+        self.error = None;
         self.handled = false;
     }
     pub fn is_polling(&self) -> bool {

@@ -18,7 +18,8 @@ pub struct Onboard {
 impl Onboard {
     fn poll(&mut self, service: &mut AddonService) {
         // poll change addon dir dialog
-        self.addon_dir_dialog.poll();
+        self.addon_dir_dialog
+            .poll_recording(service, "Selecting addon directory");
         if self.addon_dir_dialog.is_ready() {
             self.addon_dir_dialog.handle();
             let value = self.addon_dir_dialog.value.as_ref().unwrap();
