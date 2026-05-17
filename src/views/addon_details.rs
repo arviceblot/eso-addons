@@ -50,17 +50,20 @@ pub struct Details {
 
 impl Details {
     fn poll(&mut self, service: &mut AddonService) {
-        self.details.poll();
+        self.details
+            .poll_recording(service, "Loading addon details");
         if self.details.is_ready() {
             self.details.handle();
             self.build_bb_views();
         }
-        self.images.poll();
-        self.dep_view.poll();
+        self.images.poll_recording(service, "Loading addon images");
+        self.dep_view
+            .poll_recording(service, "Loading addon dependencies");
         if self.dep_view.is_ready() {
             self.dep_view.handle();
         }
-        self.dep_mutation.poll();
+        self.dep_mutation
+            .poll_recording(service, "Updating addon dependencies");
         if self.dep_mutation.is_ready() {
             self.dep_mutation.handle();
             self.dep_view
