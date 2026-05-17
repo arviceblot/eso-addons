@@ -22,6 +22,7 @@ use entity::installed_addon as InstalledAddon;
 use entity::manual_dependency as ManualDependency;
 use migration::{Condition, Migrator, MigratorTrait};
 
+use futures::StreamExt;
 use lazy_async_promise::ImmediateValuePromise;
 use md5::{Digest, Md5};
 use sea_orm::sea_query::{Expr, OnConflict};
@@ -1524,17 +1525,26 @@ where i.addon_id is null
                 }
 
                 let sv_fn2_data = fs::read_to_string(sv_fn2).unwrap();
-                let result = api.get_hm_data(sv_fn2_data).await.unwrap();
+                let response = api.get_hm_data(sv_fn2_data).await.unwrap();
 
                 let mut out_file = addon_dir.join("Modules");
                 out_file.push(format!("HarvestMap{zone}"));
                 if !out_file.exists() {
-                    // create modules zone dir
                     fs::create_dir(out_file.clone()).unwrap();
                 }
                 out_file.push(file_name);
-                let mut output = File::create(out_file)?;
-                write!(output, "{}", result.text().await.unwrap()).unwrap();
+                // Write to a temp file in the same directory, streaming the response
+                // body as it arrives, then atomically rename into place so the game
+                // never reads a partially-written file.
+                let out_dir = out_file.parent().unwrap();
+                let mut tmp = NamedTempFile::new_in(out_dir)?;
+                let mut stream = response.bytes_stream();
+                while let Some(chunk) = stream.next().await {
+                    tmp.write_all(&chunk.unwrap())?;
+                }
+                tmp.persist(&out_file)
+                    .map_err(|e| e.error)
+                    .context(error::WriteResultSnafu { path: out_file })?;
             }
             info!("Done HarvestMap data!");
             Ok(())
