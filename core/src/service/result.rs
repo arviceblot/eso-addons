@@ -14,6 +14,33 @@ pub struct AddonDepOption {
     pub option_name: Option<String>,
 }
 
+#[derive(FromQueryResult, Clone, Default, Debug)]
+pub struct AddonRef {
+    pub id: i32,
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum Resolution {
+    Installed(AddonRef),
+    SatisfiedBy(AddonRef),
+    Ignored,
+    Unresolved { suggestions: Vec<AddonRef> },
+}
+
+#[derive(Clone, Debug)]
+pub struct DepStatus {
+    pub dep_dir: String,
+    pub resolution: Resolution,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct AddonDependencyView {
+    pub forward: Vec<DepStatus>,
+    pub dependents: Vec<AddonRef>,
+    pub installed_addons: Vec<AddonRef>,
+}
+
 #[derive(Default, Clone)]
 pub struct MissingDepView {
     pub missing_dir: String,
