@@ -2,7 +2,6 @@ use reqwest::Response;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use snafu::ResultExt;
-extern crate chrono;
 
 use chrono::prelude::*;
 use tracing::info;
