@@ -1,0 +1,21 @@
+{
+  "problemMatcher": [
+    {
+      "owner": "rustc",
+      "pattern": [
+        {
+          "regexp": "^(?:\\x1b\\[[\\d;]+m)*(error|warning)(?:\\x1b\\[[\\d;]+m)*(?:\\[(E?\\d+|[A-Za-z0-9_-]+)\\])?:?(?:\\x1b\\[[\\d;]+m)*:? (.*)$",
+          "severity": 1,
+          "message": 3,
+          "code": 2
+        },
+        {
+          "regexp": "^(?:\\x1b\\[[\\d;]+m)*\\s*--> (.*):(\\d+):(\\d+)(?:\\x1b\\[[\\d;]+m)*$",
+          "file": 1,
+          "line": 2,
+          "column": 3
+        }
+      ]
+    }
+  ]
+}

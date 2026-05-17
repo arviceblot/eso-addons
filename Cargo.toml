@@ -23,6 +23,7 @@ path = "src/main.rs"
 [package.metadata.appimage]
 auto_link = true
 auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
+icon = "data/icon.png"
 args = [
     "-u",
     "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",

@@ -1,0 +1,20 @@
+{
+  "problemMatcher": [
+    {
+      "owner": "rust-test",
+      "severity": "error",
+      "pattern": [
+        {
+          "regexp": "^(?:\\x1b\\[[\\d;]+m)*thread '([^']+)' panicked at '([^']*)', (.*):(\\d+):(\\d+)(?:\\x1b\\[[\\d;]+m)*$",
+          "message": 2,
+          "file": 3,
+          "line": 4,
+          "column": 5
+        },
+        {
+          "regexp": "^(?:\\x1b\\[[\\d;]+m)*test (.+) \\.\\.\\. FAILED(?:\\x1b\\[[\\d;]+m)*$"
+        }
+      ]
+    }
+  ]
+}
