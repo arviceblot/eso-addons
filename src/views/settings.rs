@@ -273,7 +273,7 @@ impl View for Settings {
                     let promise = ImmediateValuePromise::new(async move {
                         let dialog = AsyncFileDialog::new()
                             .add_filter("text", &["txt"])
-                            .set_directory("~/")
+                            .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
                             .pick_file()
                             .await;
                         if let Some(path) = dialog {
@@ -306,7 +306,7 @@ impl View for Settings {
                     let promise = ImmediateValuePromise::new(async move {
                     let dialog = AsyncFileDialog::new()
                         .add_filter("json", &["json"])
-                        .set_directory("~/")
+                        .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
                         .save_file()
                         .await;
                         if let Some(path) = dialog {
@@ -321,7 +321,7 @@ impl View for Settings {
                     let promise = ImmediateValuePromise::new(async move {
                         let dialog = AsyncFileDialog::new()
                             .add_filter("json", &["json"])
-                            .set_directory("~/")
+                            .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
                             .pick_file()
                             .await;
                             if let Some(path) = dialog {
