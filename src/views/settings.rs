@@ -26,6 +26,8 @@ pub struct Settings {
 
     restore_dialog: PromisedValue<Option<String>>,
     restore_process: Option<PromisedValue<()>>,
+
+    clear_cache: Option<PromisedValue<()>>,
 }
 impl Settings {
     fn poll(&mut self, service: &mut AddonService) -> AddonResponse {
@@ -115,6 +117,14 @@ impl Settings {
             restore_process.poll_recording(service, "Restoring addon data");
             if restore_process.is_ready() {
                 self.restore_process = None;
+                response.response_type = AddonResponseType::AddonsChanged;
+            }
+        }
+
+        if let Some(clear_cache) = self.clear_cache.as_mut() {
+            clear_cache.poll_recording(service, "Clearing cache");
+            if clear_cache.is_ready() {
+                self.clear_cache = None;
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }
@@ -333,6 +343,15 @@ impl View for Settings {
                 }
                 ui.hyperlink_to("Logs", eso_addons_core::config::Config::default_config_dir().to_string_lossy());
             });
+            ui.add_space(5.0);
+            if self.clear_cache.as_ref().is_some_and(|x| x.is_polling()) {
+                ui.add_enabled(false, egui::Button::new(RichText::new("Clearing...").heading()));
+            }
+            else if ui.button(RichText::new("Clear Cache").heading()).clicked() {
+                let mut promise = PromisedValue::<()>::default();
+                promise.set(service.clear_cache());
+                self.clear_cache = Some(promise);
+            }
             ui.add_space(5.0);
             if let Some(repo) = REPO {
                 ui.hyperlink_to("Report an issue", format!("{repo}/issues"));
