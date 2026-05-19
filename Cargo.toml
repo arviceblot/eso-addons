@@ -1,6 +1,6 @@
 [package]
 name = "eso-addon-manager"
-version = "0.4.20"
+version = "0.4.21"
 authors = ["arviceblot <github@relay.arviceblot.com>"]
 edition = "2024"
 license = "MIT"
@@ -21,9 +21,8 @@ name = "eso-addon-manager"
 path = "src/main.rs"
 
 [package.metadata.appimage]
-auto_link = true
-auto_link_exclude_list = ["libc.so*", "libdl.so*", "libpthread.so*"]
 icon = "data/icon.png"
+desktop_entry = "data/eso-addon-manager.desktop"
 args = [
     "-u",
     "gh-releases-zsync|arviceblot|eso-addons|latest|eso-addon-manager-*x86_64.AppImage.zsync",

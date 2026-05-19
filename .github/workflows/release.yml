@@ -16,7 +16,7 @@ jobs:
         include:
           - build: linux
             os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
 
           - build: windows
             os: windows-latest
@@ -25,6 +25,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt update && sudo apt install -y musl-tools
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build binary "${{ matrix.target }}"
         run: cargo build --release --target=${{ matrix.target }}
@@ -55,7 +62,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt update
-          sudo apt install zsync
+          sudo apt install -y zsync musl-tools
           cargo install cargo-appimage
 
       - name: Install appimagetool
@@ -64,24 +71,28 @@ jobs:
           install -m 755 appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
           rm ./appimagetool-x86_64.AppImage
 
-      - name: Build binary
-        run: cargo appimage
+      - name: Add Rust target
+        run: rustup target add x86_64-unknown-linux-musl
 
-      - name: Create .zsync control files
+      - name: Build binary
+        run: cargo appimage --target=x86_64-unknown-linux-musl
+
+      - name: Rename AppImage to match zsync update pattern
         run: |
-          shopt -s nullglob
-          for f in ./*.AppImage; do
-            echo "Creating zsync for $f"
-            zsyncmake "$f"
-          done
+          VERSION="${GITHUB_REF#refs/tags/}"
+          NEW_NAME="${PROJECT_NAME}-${VERSION}-x86_64.AppImage"
+          cd target/appimage
+          mv "${PROJECT_NAME}.AppImage" "${NEW_NAME}"
+          rm -f "${PROJECT_NAME}.AppImage.zsync"
+          zsyncmake "${NEW_NAME}"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: appimage
           path: |
-            ${{ env.PROJECT_NAME }}*.AppImage
-            ${{ env.PROJECT_NAME }}*.zsync
+            target/appimage/${{ env.PROJECT_NAME }}-*-x86_64.AppImage
+            target/appimage/${{ env.PROJECT_NAME }}-*-x86_64.AppImage.zsync
 
   build_macos_universal:
     name: Build macOS universal
@@ -105,13 +116,13 @@ jobs:
           lipo -create \
             target/aarch64-apple-darwin/release/${{ env.PROJECT_NAME }} \
             target/x86_64-apple-darwin/release/${{ env.PROJECT_NAME }} \
-            -output target/universal/release/${{ env.PROJECT_NAME }}
+            -output target/universal/release/${{ env.PROJECT_NAME }}-universal-macos
 
       - name: Upload macOS universal
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PROJECT_NAME }}-macos-universal
-          path: target/universal/release/${{ env.PROJECT_NAME }}
+          path: target/universal/release/${{ env.PROJECT_NAME }}-universal-macos
 
   release_and_publish:
     name: Create release and publish
