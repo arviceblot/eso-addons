@@ -31,7 +31,7 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, ConnectionTrait,
     DatabaseConnection, DbBackend, DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType,
     ModelTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set,
-    Statement, TransactionTrait,
+    Statement, TransactionTrait, Value,
 };
 use snafu::{OptionExt, ResultExt, ensure};
 use tempfile::NamedTempFile;
@@ -298,7 +298,7 @@ impl AddonService {
                     insert_addon_dirs.push(addon_dir_model);
                 }
 
-                // Game Compatibilty
+                // Game Compatibility
                 if let Some(compats) = &list_item.compatibility {
                     for (index, item) in compats.iter().enumerate() {
                         let Ok(idx) = index.try_into() else {
@@ -420,6 +420,8 @@ impl AddonService {
             .context(error::DbGetSnafu)?;
         if let (Some(addon), Some(addon_detail)) = (&addon, &addon_detail)
             && addon.version == addon_detail.version.clone().unwrap_or_default()
+            && addon.file_name.is_some()
+            && addon.download.is_some()
         {
             return Ok(());
         }
@@ -1757,6 +1759,22 @@ where i.addon_id is null
     }
 
     // endregion
+
+    pub fn clear_cache(&self) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            // clear download urls
+            DbAddon::Entity::update_many()
+                .col_expr(DbAddon::Column::Md5, Expr::value(Value::String(None)))
+                .col_expr(DbAddon::Column::FileName, Expr::value(Value::String(None)))
+                .col_expr(DbAddon::Column::Download, Expr::value(Value::String(None)))
+                .exec(&db)
+                .await?;
+            // clear addon details
+            AddonDetail::Entity::delete_many().exec(&db).await?;
+            Ok(())
+        })
+    }
 }
 
 async fn resolve_dirs_to_addons<C: ConnectionTrait>(
