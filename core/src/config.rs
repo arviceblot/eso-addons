@@ -1,7 +1,9 @@
 use crate::error::{self, Result};
+use chrono::{DateTime, Utc};
 use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 use version_compare::Version;
@@ -32,6 +34,28 @@ pub enum TTCRegion {
     NA,
     EU,
     ALL,
+}
+
+/// Delta of TTC download state produced by a PriceTable update.
+///
+/// The download promise runs on a clone of the service, so it returns this for
+/// the caller to merge into the live config (only `Some` fields are applied);
+/// persisting from inside the clone would be lost on save.
+#[derive(Debug, Clone, Default)]
+pub struct TtcConfigUpdate {
+    pub na_version: Option<u64>,
+    pub eu_version: Option<u64>,
+    pub download_last: Option<DateTime<Utc>>,
+}
+
+/// Delta of HarvestMap sync state produced by a data update.
+///
+/// Like [`TtcConfigUpdate`], the update promise runs on a clone of the service,
+/// so it returns this for the caller to merge into the live config.
+#[derive(Debug, Clone, Default)]
+pub struct HmConfigUpdate {
+    pub zone_hashes: HashMap<String, String>,
+    pub synced_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -79,12 +103,30 @@ pub struct Config {
     pub category_list: String,
     #[serde(default)]
     pub update_ttc_pricetable: bool,
+    /// Last PriceTable version downloaded per region, used to skip redundant
+    /// downloads when the server version is unchanged.
+    #[serde(default)]
+    pub ttc_na_version: Option<u64>,
+    #[serde(default)]
+    pub ttc_eu_version: Option<u64>,
+    #[serde(default)]
+    pub ttc_download_last: Option<DateTime<Utc>>,
     #[serde(default = "default_true")]
     pub update_on_launch: bool,
     #[serde(default = "default_true")]
     pub onboard: bool,
     #[serde(default)]
     pub update_hm_data: bool,
+    /// md5 of the last HarvestMap saved-var data synced per zone, used to skip
+    /// the merge when local data is unchanged.
+    #[serde(default)]
+    pub hm_zone_hashes: HashMap<String, String>,
+    /// Time of the last successful merge per zone, used to force a refresh once
+    /// a zone's data exceeds the max age even if the local data is unchanged.
+    #[serde(default)]
+    pub hm_zone_synced: HashMap<String, DateTime<Utc>>,
+    #[serde(default)]
+    pub hm_last_sync: Option<DateTime<Utc>>,
     #[serde(default)]
     pub style: Style,
     #[serde(default)]
@@ -163,6 +205,28 @@ impl Config {
             .context(error::ConfigWriteFormatSnafu { path: &path })?;
         fs::write(&path, config_str).context(error::ConfigWriteSnafu { path: &path })?;
         Ok(())
+    }
+    pub fn apply_ttc_update(&mut self, update: TtcConfigUpdate) {
+        if update.na_version.is_some() {
+            self.ttc_na_version = update.na_version;
+        }
+        if update.eu_version.is_some() {
+            self.ttc_eu_version = update.eu_version;
+        }
+        if update.download_last.is_some() {
+            self.ttc_download_last = update.download_last;
+        }
+    }
+    pub fn apply_hm_update(&mut self, update: HmConfigUpdate) {
+        for (zone, hash) in update.zone_hashes {
+            if let Some(ts) = update.synced_at {
+                self.hm_zone_synced.insert(zone.clone(), ts);
+            }
+            self.hm_zone_hashes.insert(zone, hash);
+        }
+        if update.synced_at.is_some() {
+            self.hm_last_sync = update.synced_at;
+        }
     }
     pub fn default_config_dir() -> PathBuf {
         dirs::config_dir().unwrap().join(EAM_DATA_DIR)

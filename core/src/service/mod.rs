@@ -9,7 +9,7 @@ use self::fs_util::{fs_delete_addon, fs_read_addon};
 use self::result::*;
 use crate::addons::{Addon, get_root_dir};
 use crate::api::ApiClient;
-use crate::config::{self, Config, TTCRegion};
+use crate::config::{self, Config, HmConfigUpdate, TTCRegion, TtcConfigUpdate};
 use crate::error::{self, Result};
 use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
@@ -44,8 +44,8 @@ mod backup;
 mod fs_util;
 pub mod result;
 
-const TTC_URL: &str = "https://us.tamrieltradecentre.com/download/PriceTable";
-const TTC_EU_URL: &str = "https://eu.tamrieltradecentre.com/download/PriceTable";
+const TTC_NA_DOMAIN: &str = "us.tamrieltradecentre.com";
+const TTC_EU_DOMAIN: &str = "eu.tamrieltradecentre.com";
 
 /// Safe upper bound for SQLite bound parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
 /// Defaults to 32766 on 3.32.0+ (bundled by libsqlite3-sys); 32000 leaves headroom.
@@ -1393,25 +1393,56 @@ where i.addon_id is null
         fs_read_addon(&addon_path)
     }
 
-    pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<()> {
+    pub fn update_ttc_pricetable(&self) -> ImmediateValuePromise<TtcConfigUpdate> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Updating TTC PriceTable");
-            if service.config.ttc_region == TTCRegion::NA
-                || service.config.ttc_region == TTCRegion::ALL
-            {
-                service
-                    .base_fs_download_extract(TTC_URL, Some("TamrielTradeCentre"), None)
-                    .await?;
+            let mut update = TtcConfigUpdate::default();
+            let region = &service.config.ttc_region;
+
+            let mut targets = vec![];
+            if *region == TTCRegion::NA || *region == TTCRegion::ALL {
+                targets.push((TTC_NA_DOMAIN, service.config.ttc_na_version));
             }
-            if service.config.ttc_region == TTCRegion::EU
-                || service.config.ttc_region == TTCRegion::ALL
-            {
-                service
-                    .base_fs_download_extract(TTC_EU_URL, Some("TamrielTradeCentre"), None)
-                    .await?;
+            if *region == TTCRegion::EU || *region == TTCRegion::ALL {
+                targets.push((TTC_EU_DOMAIN, service.config.ttc_eu_version));
             }
-            Ok(())
+
+            let mut downloaded = false;
+            for (domain, local_version) in targets {
+                // Conditional check: skip download when the server PriceTable
+                // version matches what we last downloaded. Fall back to
+                // downloading if the version can't be fetched.
+                let server_version = match service.api.get_ttc_pricetable_version(domain).await {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        warn!("Could not fetch TTC version for {domain}: {e}; downloading anyway");
+                        None
+                    }
+                };
+                if let (Some(server), Some(local)) = (server_version, local_version)
+                    && server == local
+                {
+                    info!("TTC PriceTable {domain} unchanged (v{server}), skipping download");
+                    continue;
+                }
+
+                let url = format!("https://{domain}/download/PriceTable");
+                service
+                    .base_fs_download_extract(&url, Some("TamrielTradeCentre"), None)
+                    .await?;
+                downloaded = true;
+                if domain == TTC_NA_DOMAIN {
+                    update.na_version = server_version;
+                } else {
+                    update.eu_version = server_version;
+                }
+            }
+
+            if downloaded {
+                update.download_last = Some(chrono::Utc::now());
+            }
+            Ok(update)
         })
     }
 
@@ -1573,7 +1604,7 @@ where i.addon_id is null
         })
     }
 
-    pub fn update_hm_data(&self) -> ImmediateValuePromise<()> {
+    pub fn update_hm_data(&self) -> ImmediateValuePromise<HmConfigUpdate> {
         let db = self.db.clone();
         let config = self.config.clone();
         let api = self.api.clone();
@@ -1596,32 +1627,55 @@ where i.addon_id is null
 
             let empty_file_data = fs::read_to_string(empty_file)?;
 
+            // Refresh a zone at least this often even when local data is
+            // unchanged, so community data does not go stale.
+            let max_age = chrono::Duration::days(1);
+            let now = chrono::Utc::now();
+            let mut update = HmConfigUpdate::default();
+
             // iterate over the different zones
             for zone in ["AD", "EP", "DC", "DLC", "NF"] {
                 let file_name = format!("HarvestMap{zone}.lua");
-                info!("Working on {file_name}...");
 
-                let sv_fn1 = saved_var_dir.join(file_name.clone());
-                let sv_fn2 = saved_var_dir.join(format!("{file_name}~"));
-
-                if sv_fn1.exists() {
-                    fs::copy(sv_fn1, sv_fn2.clone())?;
+                let sv_file = saved_var_dir.join(&file_name);
+                let data = if sv_file.exists() {
+                    fs::read_to_string(&sv_file)?
                 } else {
-                    let file_data = format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str());
-                    let mut output = File::create(sv_fn2.clone())?;
-                    write!(output, "{file_data}")?;
-                }
+                    format!("Harvest{zone}_SavedVars{}", empty_file_data.as_str())
+                };
 
-                let sv_fn2_data = fs::read_to_string(sv_fn2)?;
-                let response = api.get_hm_data(sv_fn2_data).await?;
+                // Hash the local data so we can skip the merge when nothing has
+                // changed since our last sync.
+                let mut hasher = Md5::new();
+                hasher.update(data.as_bytes());
+                let mut hash = String::new();
+                for x in hasher.finalize().iter() {
+                    hash.push_str(format!("{x:02x}").as_str());
+                }
 
                 let mut out_file = addon_dir.join("Modules");
                 out_file.push(format!("HarvestMap{zone}"));
-                if !out_file.exists() {
-                    fs::create_dir(out_file.clone())?;
+                out_file.push(&file_name);
+
+                let fresh = config
+                    .hm_zone_synced
+                    .get(zone)
+                    .is_some_and(|t| now.signed_duration_since(*t) < max_age);
+                if config.hm_zone_hashes.get(zone).map(String::as_str) == Some(hash.as_str())
+                    && out_file.exists()
+                    && fresh
+                {
+                    info!("HarvestMap {zone} unchanged and fresh, skipping");
+                    continue;
                 }
-                out_file.push(file_name);
+
+                info!("Syncing HarvestMap {zone}...");
+                let response = api.get_hm_data(data).await?;
+
                 let out_dir = out_file.parent().unwrap();
+                if !out_dir.exists() {
+                    fs::create_dir_all(out_dir)?;
+                }
                 let mut tmp = NamedTempFile::new_in(out_dir)?;
                 let mut stream = response.bytes_stream();
                 while let Some(chunk) = stream.next().await {
@@ -1632,9 +1686,15 @@ where i.addon_id is null
                 tmp.persist(&out_file)
                     .map_err(|e| e.error)
                     .context(error::WriteResultSnafu { path: out_file })?;
+
+                update.zone_hashes.insert(zone.to_string(), hash);
+            }
+
+            if !update.zone_hashes.is_empty() {
+                update.synced_at = Some(now);
             }
             info!("Done HarvestMap data!");
-            Ok(())
+            Ok(update)
         })
     }
     pub fn get_addons_by_author(
