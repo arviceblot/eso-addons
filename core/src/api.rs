@@ -15,6 +15,8 @@ const GLOBAL_CONFIG: &str = "globalconfig.json";
 const GAME_ID: &str = "ESO";
 /// Current configuration for v3 API
 const ENDPOINT_URL: &str = "https://api.mmoui.com/v3";
+/// User-Agent expected by the TamrielTradeCentre upload/version endpoints.
+const TTC_USER_AGENT: &str = "TamrielTradeCentreClient/1.0.0";
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {
@@ -113,6 +115,21 @@ impl ApiClient {
             .context(error::ApiGetUrlSnafu { url })
     }
 
+    pub async fn get_ttc_pricetable_version(&self, domain: &str) -> Result<u64> {
+        let url = format!("https://{domain}/api/GetTradeClientVersion");
+        let resp: TradeClientVersion = self
+            .client
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, TTC_USER_AGENT)
+            .send()
+            .await
+            .context(error::ApiGetUrlSnafu { url: url.as_str() })?
+            .json()
+            .await
+            .context(error::ApiParseResponseSnafu { url: url.as_str() })?;
+        Ok(resp.price_table_version)
+    }
+
     async fn get_game_config(&mut self) -> Result<()> {
         let res = self.req_url::<EsoApiFeeds>(&self.game_config_url).await?;
         self.file_list_url = res.api_feeds.file_list;
@@ -145,6 +162,12 @@ impl ApiClient {
 
         serde_json::from_slice(&bytes).context(error::ApiDeserializeSnafu { url })
     }
+}
+
+#[derive(Deserialize)]
+struct TradeClientVersion {
+    #[serde(rename = "PriceTableVersion")]
+    price_table_version: u64,
 }
 
 #[derive(Deserialize)]
