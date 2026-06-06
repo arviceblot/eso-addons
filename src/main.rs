@@ -217,8 +217,10 @@ impl EamApp {
             // check missing dependencies
             self.check_missing_deps();
             // force sort as addons list may have updated
-            self.installed_view = Installed::new()
-                .displayed_addons(self.installed_addons.value.as_ref().unwrap().to_owned());
+            let installed = self.installed_addons.value.as_ref().unwrap();
+            self.settings
+                .set_installed_ids(installed.iter().map(|a| a.id).collect());
+            self.installed_view = Installed::new().displayed_addons(installed.to_owned());
         }
 
         self.missing_deps
