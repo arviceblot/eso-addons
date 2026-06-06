@@ -13,6 +13,17 @@ pub struct BBView {
 #[derive(Default)]
 pub struct BBState {
     open_image: Option<String>,
+    clicked_link: Option<String>,
+}
+
+impl BBState {
+    /// Take the URL of the most recently clicked link, if any.
+    ///
+    /// Link clicks are reported here rather than opened directly so the
+    /// caller can decide how to handle each URL.
+    pub fn take_clicked_link(&mut self) -> Option<String> {
+        self.clicked_link.take()
+    }
 }
 
 struct Ctx<'b> {
@@ -162,7 +173,7 @@ fn render_paragraph(ui: &mut egui::Ui, inlines: &[Inline], ctx: &mut Ctx<'_>) {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                     if resp.clicked() {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                        ctx.state.clicked_link = Some(url.clone());
                     }
                 }
                 Inline::Image(url) => {
