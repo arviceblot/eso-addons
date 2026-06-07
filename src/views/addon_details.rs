@@ -324,6 +324,9 @@ impl View for Details {
                         ui.label(addon.description.as_deref().unwrap_or(""));
                     } else if let Some(view) = &self.bb_description {
                         view.show(ui, &mut self.bb_description_state, "description");
+                        if let Some(url) = self.bb_description_state.take_clicked_link() {
+                            handle_bb_link(ui, &url, &mut response);
+                        }
                     }
                 }
                 DetailView::ChangeLog => {
@@ -331,6 +334,9 @@ impl View for Details {
                         ui.label(addon.change_log.as_deref().unwrap_or(""));
                     } else if let Some(view) = &self.bb_changelog {
                         view.show(ui, &mut self.bb_changelog_state, "change_log");
+                        if let Some(url) = self.bb_changelog_state.take_clicked_link() {
+                            handle_bb_link(ui, &url, &mut response);
+                        }
                     }
                 }
                 DetailView::Pictures => {
@@ -576,6 +582,44 @@ impl View for Details {
     }
 }
 
+/// Navigate to the in-app detail view when a bbcode link points at another
+/// addon on esoui, otherwise open it in the browser.
+fn handle_bb_link(ui: &egui::Ui, url: &str, response: &mut AddonResponse) {
+    match esoui_addon_id(url) {
+        Some(id) => {
+            response.addon_id = id;
+            response.response_type = AddonResponseType::AddonName;
+        }
+        None => ui.ctx().open_url(egui::OpenUrl::new_tab(url.to_string())),
+    }
+}
+
+/// Extract the addon id from an esoui file info URL, matching the forms
+/// `esoui.com/downloads/info<id>-<slug>.html` and
+/// `esoui.com/downloads/fileinfo.php?id=<id>`.
+fn esoui_addon_id(url: &str) -> Option<i32> {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let (host, path) = rest.split_once('/')?;
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if !host.eq_ignore_ascii_case("esoui.com") {
+        return None;
+    }
+    let last = path.rsplit('/').next().unwrap_or(path);
+    if let Some(num) = last.strip_prefix("info") {
+        return leading_i32(num);
+    }
+    path.split('?')
+        .nth(1)?
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("id="))
+        .and_then(leading_i32)
+}
+
+fn leading_i32(s: &str) -> Option<i32> {
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    s.get(..end).filter(|d| !d.is_empty())?.parse().ok()
+}
+
 enum DepAction {
     Navigate(i32),
     SetIgnored(String),
@@ -596,5 +640,40 @@ impl ResetView for Details {
         self.row_state.clear();
         self.bb_description = None;
         self.bb_changelog = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::esoui_addon_id;
+
+    #[test]
+    fn parses_info_url() {
+        assert_eq!(
+            esoui_addon_id("https://www.esoui.com/downloads/info1360-LazyWritCrafter.html"),
+            Some(1360)
+        );
+    }
+
+    #[test]
+    fn parses_fileinfo_query() {
+        assert_eq!(
+            esoui_addon_id("https://www.esoui.com/downloads/fileinfo.php?id=1360"),
+            Some(1360)
+        );
+        assert_eq!(
+            esoui_addon_id("http://esoui.com/downloads/fileinfo.php?foo=1&id=42"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn rejects_other_hosts_and_pages() {
+        assert_eq!(esoui_addon_id("https://github.com/info123-foo.html"), None);
+        assert_eq!(esoui_addon_id("https://www.esoui.com/downloads/"), None);
+        assert_eq!(
+            esoui_addon_id("https://www.esoui.com/downloads/cat1-Combat.html"),
+            None
+        );
     }
 }
