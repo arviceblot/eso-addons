@@ -97,8 +97,8 @@ struct EamApp {
     install_one: HashMap<i32, PromisedValue<()>>,
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     update: PromisedValue<UpdateResult>,
-    ttc_pricetable: PromisedValue<()>,
-    hm_data: Option<ImmediateValuePromise<()>>,
+    ttc_pricetable: PromisedValue<config::TtcConfigUpdate>,
+    hm_data: Option<ImmediateValuePromise<config::HmConfigUpdate>>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
     /// Only auto-nav to MissingDeps when newly discovered, not on every refresh.
@@ -188,23 +188,27 @@ impl EamApp {
             .poll_recording(&self.service, "Updating TTC PriceTable");
         if self.ttc_pricetable.is_ready() {
             info!("Updated TTC PriceTable.");
+            if let Some(update) = self.ttc_pricetable.value.take() {
+                self.service.config.apply_ttc_update(update);
+                self.service.save_config();
+            }
             self.ttc_pricetable.handle();
         }
 
-        if let Some(hm_data) = self.hm_data.as_mut() {
+        if let Some(mut hm_data) = self.hm_data.take() {
             match hm_data.poll_state() {
-                ImmediateValueState::Updating => {}
-                ImmediateValueState::Success(_) => {
+                ImmediateValueState::Updating => {
+                    self.hm_data = Some(hm_data);
+                }
+                ImmediateValueState::Success(update) => {
                     info!("Updated HarvestMap data.");
-                    self.hm_data = None;
+                    self.service.config.apply_hm_update(update.clone());
+                    self.service.save_config();
                 }
                 ImmediateValueState::Error(e) => {
                     self.service.record_error("Updating HarvestMap data", &**e);
-                    self.hm_data = None;
                 }
-                ImmediateValueState::Empty => {
-                    self.hm_data = None;
-                }
+                ImmediateValueState::Empty => {}
             }
         }
 
@@ -217,8 +221,10 @@ impl EamApp {
             // check missing dependencies
             self.check_missing_deps();
             // force sort as addons list may have updated
-            self.installed_view = Installed::new()
-                .displayed_addons(self.installed_addons.value.as_ref().unwrap().to_owned());
+            let installed = self.installed_addons.value.as_ref().unwrap();
+            self.settings
+                .set_installed_ids(installed.iter().map(|a| a.id).collect());
+            self.installed_view = Installed::new().displayed_addons(installed.to_owned());
         }
 
         self.missing_deps

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,11 @@ use crate::views::View;
 use crate::{REPO, VERSION};
 
 use super::ui_helpers::{AddonResponse, AddonResponseType, PromisedValue};
+
+/// TamrielTradeCentre addon id, required for the TTC PriceTable update.
+const TTC_ADDON_ID: i32 = 1245;
+/// HarvestMap-Data addon id, required for the HarvestMap data update.
+const HM_DATA_ADDON_ID: i32 = 3034;
 
 #[derive(Default)]
 pub struct Settings {
@@ -28,8 +34,14 @@ pub struct Settings {
     restore_process: Option<PromisedValue<()>>,
 
     clear_cache: Option<PromisedValue<()>>,
+
+    installed_ids: HashSet<i32>,
 }
 impl Settings {
+    pub fn set_installed_ids(&mut self, ids: HashSet<i32>) {
+        self.installed_ids = ids;
+    }
+
     fn poll(&mut self, service: &mut AddonService) -> AddonResponse {
         let mut response = AddonResponse::default();
 
@@ -139,7 +151,9 @@ impl View for Settings {
         ui: &mut egui::Ui,
         service: &mut AddonService,
     ) -> AddonResponse {
-        let response = self.poll(service);
+        let mut response = self.poll(service);
+        let ttc_installed = self.installed_ids.contains(&TTC_ADDON_ID);
+        let hm_installed = self.installed_ids.contains(&HM_DATA_ADDON_ID);
         ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
@@ -246,6 +260,15 @@ impl View for Settings {
                     .changed();
                 ui.label("(requires TamrielTradeCentre to be installed)");
             });
+            if service.config.update_ttc_pricetable && !ttc_installed {
+                install_warning(ui, &mut response, "TamrielTradeCentre", TTC_ADDON_ID);
+            }
+            if let Some(last) = service.config.ttc_download_last {
+                ui.weak(format!(
+                    "Last PriceTable download: {}",
+                    last.format("%Y-%m-%d %H:%M UTC")
+                ));
+            }
             ui.horizontal(|ui| {
                 updates_changed |= ui
                     .checkbox(
@@ -255,6 +278,15 @@ impl View for Settings {
                     .changed();
                 ui.label("(requires HarvestMap-Data to be installed)");
             });
+            if service.config.update_hm_data && !hm_installed {
+                install_warning(ui, &mut response, "HarvestMap-Data", HM_DATA_ADDON_ID);
+            }
+            if let Some(last) = service.config.hm_last_sync {
+                ui.weak(format!(
+                    "Last HarvestMap sync: {}",
+                    last.format("%Y-%m-%d %H:%M UTC")
+                ));
+            }
             if updates_changed {
                 service.save_config();
             }
@@ -391,4 +423,19 @@ impl View for Settings {
 
         response
     }
+}
+
+/// Warn that an update is enabled without its addon installed, with a link to
+/// open the addon's detail view to install it.
+fn install_warning(ui: &mut egui::Ui, response: &mut AddonResponse, name: &str, addon_id: i32) {
+    ui.horizontal_wrapped(|ui| {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!("⚠ {name} is not installed; this update won't take effect without it."),
+        );
+        if ui.link(format!("Install {name}")).clicked() {
+            response.addon_id = addon_id;
+            response.response_type = AddonResponseType::AddonName;
+        }
+    });
 }
