@@ -6,6 +6,9 @@ on:
 name: Create Release
 env:
   PROJECT_NAME: eso-addon-manager
+  # glibc floor for Linux builds; 2.28 covers RHEL 8, Debian 10+, Ubuntu 18.04+.
+  GLIBC_VERSION: "2.28"
+  ZIGLANG_VERSION: "0.16.0"
 
 jobs:
   build:
@@ -16,7 +19,7 @@ jobs:
         include:
           - build: linux
             os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-gnu
 
           - build: windows
             os: windows-latest
@@ -26,18 +29,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Install musl toolchain
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt update && sudo apt install -y musl-tools
+      - name: Install Zig and cargo-zigbuild (Linux)
+        if: matrix.build == 'linux'
+        run: |
+          pip3 install --break-system-packages ziglang==${ZIGLANG_VERSION}
+          cargo install --locked cargo-zigbuild
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build binary "${{ matrix.target }}"
-        run: cargo build --release --target=${{ matrix.target }}
-
+      # Test before Build so zigbuild is the last to link the binary, keeping the glibc floor.
       - name: Test binary "${{ matrix.target }}"
         run: cargo test --release --target=${{ matrix.target }}
+
+      - name: Build binary "${{ matrix.target }}"
+        if: matrix.build == 'linux'
+        run: cargo zigbuild --release --target=${{ matrix.target }}.${{ env.GLIBC_VERSION }}
+
+      - name: Build binary "${{ matrix.target }}"
+        if: matrix.build != 'linux'
+        run: cargo build --release --target=${{ matrix.target }}
 
       - name: Rename binary file
         shell: bash
@@ -59,40 +70,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Install packages
+      - name: Install Zig and cargo-zigbuild
         run: |
-          sudo apt update
-          sudo apt install -y zsync musl-tools
-          cargo install cargo-appimage
+          pip3 install --break-system-packages ziglang==${ZIGLANG_VERSION}
+          cargo install --locked cargo-zigbuild
 
-      - name: Install appimagetool
+      - name: Build AppImage
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./scripts/build-appimage.sh
+
+      - name: Smoke test AppImage (X11 and Wayland)
         run: |
-          curl -LO https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          install -m 755 appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
-          rm ./appimagetool-x86_64.AppImage
-
-      - name: Add Rust target
-        run: rustup target add x86_64-unknown-linux-musl
-
-      - name: Build binary
-        run: cargo appimage --target=x86_64-unknown-linux-musl
-
-      - name: Rename AppImage to match zsync update pattern
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          NEW_NAME="${PROJECT_NAME}-${VERSION}-x86_64.AppImage"
-          cd target/appimage
-          mv "${PROJECT_NAME}.AppImage" "${NEW_NAME}"
-          rm -f "${PROJECT_NAME}.AppImage.zsync"
-          zsyncmake "${NEW_NAME}"
+          ./scripts/smoke-deps.sh
+          ./scripts/smoke-appimage.sh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: appimage
           path: |
-            target/appimage/${{ env.PROJECT_NAME }}-*-x86_64.AppImage
-            target/appimage/${{ env.PROJECT_NAME }}-*-x86_64.AppImage.zsync
+            dist/${{ env.PROJECT_NAME }}-*-x86_64.AppImage
+            dist/${{ env.PROJECT_NAME }}-*-x86_64.AppImage.zsync
 
   build_macos_universal:
     name: Build macOS universal

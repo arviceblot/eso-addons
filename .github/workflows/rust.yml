@@ -16,6 +16,7 @@ env:
   PROJECT_NAME: ${{ github.event.repository.name }}
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  ZIGLANG_VERSION: "0.16.0"
 
 jobs:
   fmt:
@@ -65,3 +66,20 @@ jobs:
         run: echo "::add-matcher::.github/problem-matchers/rustc.json"
       - name: Cargo build (release)
         run: cargo build --workspace --release
+
+  appimage:
+    name: AppImage smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Zig and cargo-zigbuild
+        run: |
+          pip3 install --break-system-packages ziglang==${ZIGLANG_VERSION}
+          cargo install --locked cargo-zigbuild
+      - name: Build AppImage
+        run: ./scripts/build-appimage.sh
+      - name: Smoke test AppImage (X11 and Wayland)
+        run: |
+          ./scripts/smoke-deps.sh
+          ./scripts/smoke-appimage.sh
