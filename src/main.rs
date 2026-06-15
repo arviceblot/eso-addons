@@ -103,6 +103,9 @@ struct EamApp {
     install_missing_deps: PromisedValue<()>,
     /// Only auto-nav to MissingDeps when newly discovered, not on every refresh.
     had_missing_deps: bool,
+    /// Report once the GUI is up and exit; set by ESO_ADDONS_SMOKE_TEST.
+    smoke_test: bool,
+    smoke_reported: bool,
 }
 
 impl EamApp {
@@ -155,6 +158,8 @@ impl EamApp {
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
             had_missing_deps: false,
+            smoke_test: std::env::var_os("ESO_ADDONS_SMOKE_TEST").is_some(),
+            smoke_reported: false,
         };
         if app.service.config.update_on_launch {
             // check for update on init
@@ -402,6 +407,18 @@ impl eframe::App for EamApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
+
+        if self.smoke_test {
+            if !self.smoke_reported {
+                use std::io::Write;
+                println!("eso-addons: smoke test ok");
+                let _ = io::stdout().flush();
+                self.smoke_reported = true;
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
         if ctx.input(|i| i.viewport().close_requested()) {
             self.handle_quit();
         }

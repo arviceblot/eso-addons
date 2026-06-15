@@ -79,3 +79,7 @@ test-addons/
 libs/
 *.AppImage
 *.zsync
+
+# Local release build outputs (scripts/build-appimage.sh)
+/dist/
+/.cache/
