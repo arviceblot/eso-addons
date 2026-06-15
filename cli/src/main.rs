@@ -62,7 +62,9 @@ impl UpdateCommand {
     pub async fn run(&self, service: &mut AddonService) -> Result<()> {
         // Check if only updating PriceTable
         if self.ttc_pricetable {
-            service.update_ttc_pricetable().await?;
+            let update = service.update_ttc_pricetable().await?;
+            service.config.apply_ttc_update(update);
+            service.save_config();
             return Ok(());
         }
 

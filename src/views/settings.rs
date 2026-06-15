@@ -263,6 +263,12 @@ impl View for Settings {
             if service.config.update_ttc_pricetable && !ttc_installed {
                 install_warning(ui, &mut response, "TamrielTradeCentre", TTC_ADDON_ID);
             }
+            if let Some(last) = service.config.ttc_download_last {
+                ui.weak(format!(
+                    "Last PriceTable download: {}",
+                    last.format("%Y-%m-%d %H:%M UTC")
+                ));
+            }
             ui.horizontal(|ui| {
                 updates_changed |= ui
                     .checkbox(
@@ -274,6 +280,12 @@ impl View for Settings {
             });
             if service.config.update_hm_data && !hm_installed {
                 install_warning(ui, &mut response, "HarvestMap-Data", HM_DATA_ADDON_ID);
+            }
+            if let Some(last) = service.config.hm_last_sync {
+                ui.weak(format!(
+                    "Last HarvestMap sync: {}",
+                    last.format("%Y-%m-%d %H:%M UTC")
+                ));
             }
             if updates_changed {
                 service.save_config();
