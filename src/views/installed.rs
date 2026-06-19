@@ -9,6 +9,8 @@ use super::{
     ui_helpers::{AddonResponse, AddonResponseType, AddonTable, Sort},
 };
 
+const LIBRARY_CATEGORY: &str = "Libraries";
+
 #[derive(Default)]
 pub struct Installed {
     displayed_addons: Vec<AddonShowDetails>,
@@ -191,18 +193,46 @@ impl View for Installed {
                 return response;
             }
 
-            egui::CentralPanel::default().show_inside(ui, |ui| {
-                let addons: Vec<&AddonShowDetails> = self
-                    .displayed_addons
-                    .iter()
-                    .filter(|x| {
-                        x.name
-                            .to_lowercase()
-                            .contains(self.filter.to_lowercase().as_str())
-                    })
-                    .collect();
-                response = AddonTable::new(&addons).installable(true).ui(ui);
-            });
+            let filter = self.filter.to_lowercase();
+            let matched: Vec<&AddonShowDetails> = self
+                .displayed_addons
+                .iter()
+                .filter(|x| x.name.to_lowercase().contains(filter.as_str()))
+                .collect();
+
+            // While searching, keep a single unified list so library matches aren't
+            // squeezed into the bottom panel.
+            if filter.is_empty() {
+                let (libraries, addons): (Vec<&AddonShowDetails>, Vec<&AddonShowDetails>) = matched
+                    .into_iter()
+                    .partition(|x| x.category == LIBRARY_CATEGORY);
+
+                if !libraries.is_empty() {
+                    egui::Panel::bottom("installed_libraries")
+                        .resizable(true)
+                        .default_size(200.0)
+                        .show_inside(ui, |ui| {
+                            ui.add_space(5.0);
+                            ui.heading(format!("Libraries - {} addons", libraries.len()));
+                            ui.add_space(5.0);
+                            let lib_response = AddonTable::new(&libraries).installable(true).ui(ui);
+                            if lib_response.response_type != AddonResponseType::default() {
+                                response = lib_response;
+                            }
+                        });
+                }
+
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    let addon_response = AddonTable::new(&addons).installable(true).ui(ui);
+                    if addon_response.response_type != AddonResponseType::default() {
+                        response = addon_response;
+                    }
+                });
+            } else {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    response = AddonTable::new(&matched).installable(true).ui(ui);
+                });
+            }
         }
 
         response
