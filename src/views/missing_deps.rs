@@ -35,6 +35,7 @@ impl MissingDeps {
     }
 
     pub fn set_deps(&mut self, deps: Vec<AddonDepOption>) {
+        self.missing_deps.clear();
         for dep in deps.iter() {
             let dep_view = match self.missing_deps.entry(dep.missing_dir.clone()) {
                 Entry::Occupied(o) => o.into_mut(),
