@@ -236,22 +236,24 @@ impl EamApp {
             .poll_recording(&self.service, "Checking missing dependencies");
         if self.missing_deps.is_ready() {
             self.missing_deps.handle();
-            let has_missing = !self.missing_deps.value.as_ref().unwrap().is_empty();
+            let deps = self.missing_deps.value.as_ref().unwrap().to_owned();
+            let has_missing = !deps.is_empty();
+            self.missing_dep.set_addons(
+                self.installed_addons
+                    .value
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|x| (x.id, x.name.to_string()))
+                    .collect(),
+            );
+            self.missing_dep.set_deps(deps);
             if has_missing {
-                self.missing_dep.set_addons(
-                    self.installed_addons
-                        .value
-                        .as_ref()
-                        .unwrap()
-                        .iter()
-                        .map(|x| (x.id, x.name.to_string()))
-                        .collect(),
-                );
-                self.missing_dep
-                    .set_deps(self.missing_deps.value.as_ref().unwrap().to_owned());
                 if !self.had_missing_deps {
                     self.change_view(ViewOpt::MissingDeps);
                 }
+            } else if self.view == ViewOpt::MissingDeps {
+                self.close_view();
             }
             self.had_missing_deps = has_missing;
         }
