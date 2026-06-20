@@ -777,9 +777,18 @@ where i.addon_id is null
                 .context(error::DbGetSnafu)?;
             let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
             let mut inserts: Vec<InstalledAddon::ActiveModel> = Vec::new();
+            let mut pending_by_addon_id: HashMap<i32, Vec<(String, String)>> = HashMap::new();
+
             for x in db_results.iter() {
                 let addon_id: i32 = x.try_get_by(0).context(error::DbGetSnafu)?;
+                let addon_name: String = x.try_get_by(1).context(error::DbGetSnafu)?;
                 let dir: String = x.try_get_by(2).context(error::DbGetSnafu)?;
+
+                pending_by_addon_id
+                    .entry(addon_id)
+                    .or_default()
+                    .push((addon_name.clone(), dir.clone()));
+
                 inserts.push(InstalledAddon::ActiveModel {
                     addon_id: ActiveValue::Set(addon_id),
                     version: ActiveValue::Set(
@@ -790,6 +799,24 @@ where i.addon_id is null
                     ),
                     date: ActiveValue::Set(now.to_string()),
                 });
+            }
+
+            for (addon_id, matches) in pending_by_addon_id
+                .iter()
+                .filter(|(_, matches)| matches.len() > 1)
+            {
+                warn!(
+                    "Duplicate installed-addon detection candidate for addon_id {}: {} matches",
+                    addon_id,
+                    matches.len()
+                );
+
+                for (addon_name, dir) in matches {
+                    warn!(
+                        "  duplicate candidate addon_id={} name={:?} dir={:?}",
+                        addon_id, addon_name, dir
+                    );
+                }
             }
             // 2. insert as installed, update checks will handle the rest
             if !inserts.is_empty() {
