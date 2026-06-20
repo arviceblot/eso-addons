@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use dotenv::dotenv;
 use eframe::egui::{self, RichText, Visuals, vec2};
 use eso_addons_core::config;
