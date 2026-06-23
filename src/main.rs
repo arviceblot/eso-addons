@@ -277,18 +277,22 @@ impl EamApp {
 
         // update addons poll
         let mut updated_addons = vec![];
+
         for (addon_id, promise) in self.update_one.iter_mut() {
             promise.poll_recording(&self.service, &format!("Updating addon {addon_id}"));
             if promise.is_ready() {
                 updated_addons.push(addon_id.to_owned());
                 promise.handle();
-                addons_changed = true;
                 info!("Updated addon: {addon_id}");
             }
         }
+
         for addon_id in updated_addons.iter() {
             self.update_one.remove(addon_id);
         }
+
+        addons_changed =
+            addons_changed || (!updated_addons.is_empty() && self.update_one.is_empty());
 
         // install addons poll
         let mut installed_addons = vec![];
