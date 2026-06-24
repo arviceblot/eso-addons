@@ -25,6 +25,8 @@ pub struct Search {
     previous_category: i32,
     sort: Sort,
     prev_sort: Sort,
+    ascending: bool,
+    prev_ascending: bool,
 }
 
 impl Search {
@@ -32,6 +34,8 @@ impl Search {
         Self {
             sort: Sort::TotalDownloads,
             prev_sort: Sort::Id,
+            ascending: Sort::TotalDownloads.default_ascending(),
+            prev_ascending: Sort::TotalDownloads.default_ascending(),
             ..Default::default()
         }
     }
@@ -80,76 +84,25 @@ impl Search {
 
     fn handle_sort(&mut self) {
         if self.prev_sort != self.sort {
-            self.prev_sort = self.sort;
-            self.sort_addons();
+            self.ascending = self.sort.default_ascending();
+        } else if self.prev_ascending == self.ascending {
+            return;
         }
+        self.prev_sort = self.sort;
+        self.prev_ascending = self.ascending;
+        self.sort_addons();
     }
 
     fn sort_addons(&mut self) {
-        if self.category_addons.value.as_ref().is_some() {
-            self.displayed_addons = self.category_addons.value.as_ref().unwrap().to_vec();
+        if let Some(addons) = self.category_addons.value.as_ref() {
+            self.displayed_addons = addons.to_vec();
         }
         info!("Sorting addons");
-        match self.sort {
-            Sort::Author => self.displayed_addons.sort_unstable_by(|a, b| {
-                a.author_name
-                    .to_lowercase()
-                    .cmp(&b.author_name.to_lowercase())
-            }),
-            Sort::Name => self
-                .displayed_addons
-                .sort_unstable_by_key(|a| a.name.to_lowercase()),
-            Sort::Updated => self
-                .displayed_addons
-                .sort_unstable_by(|a, b| a.date.cmp(&b.date)),
-            Sort::TotalDownloads => self.displayed_addons.sort_unstable_by(|a, b| {
-                b.download_total
-                    .as_ref()
-                    .unwrap_or(&"0".to_string())
-                    .parse::<i32>()
-                    .unwrap_or(0)
-                    .cmp(
-                        &a.download_total
-                            .as_ref()
-                            .unwrap_or(&"0".to_string())
-                            .parse::<i32>()
-                            .unwrap_or(0),
-                    )
-            }),
-            Sort::MonthlyDownloads => self.displayed_addons.sort_unstable_by(|a, b| {
-                b.download
-                    .as_ref()
-                    .unwrap_or(&"0".to_string())
-                    .parse::<i32>()
-                    .unwrap_or(0)
-                    .cmp(
-                        &a.download
-                            .as_ref()
-                            .unwrap_or(&"0".to_string())
-                            .parse::<i32>()
-                            .unwrap_or(0),
-                    )
-            }),
-            Sort::Favorites => self.displayed_addons.sort_unstable_by(|a, b| {
-                b.favorite_total
-                    .as_ref()
-                    .unwrap_or(&"0".to_string())
-                    .parse::<i32>()
-                    .unwrap_or(0)
-                    .cmp(
-                        &a.favorite_total
-                            .as_ref()
-                            .unwrap_or(&"0".to_string())
-                            .parse::<i32>()
-                            .unwrap_or(0),
-                    )
-            }),
-            Sort::Id => self.displayed_addons.sort_unstable_by_key(|a| a.id),
-        }
-
-        // secondary sort, put upgradeable at top
-        self.displayed_addons
-            .sort_unstable_by_key(|b| std::cmp::Reverse(b.is_upgradable()));
+        crate::views::ui_helpers::sort_addons(
+            &mut self.displayed_addons,
+            self.sort,
+            self.ascending,
+        );
     }
 }
 impl View for Search {
@@ -227,7 +180,11 @@ impl View for Search {
                         .contains(self.search.to_lowercase().as_str())
                 })
                 .collect();
-            response = AddonTable::new(&addons).installable(true).ui(ui);
+            response = AddonTable::new(&addons).installable(true).ui(
+                ui,
+                &mut self.sort,
+                &mut self.ascending,
+            );
         });
         response
     }
