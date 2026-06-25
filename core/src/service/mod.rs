@@ -720,14 +720,19 @@ impl AddonService {
                     nested_dirs.entry(top_level).or_default().push(dir_name);
                     continue;
                 }
-                let new_version = manifest.version.unwrap_or("0".to_string());
-                if let Some(version) = addon_versions.get(&manifest.title) {
-                    let current = Version::from(version);
-                    let candidate = Version::from(&new_version);
-                    if let (Some(current), Some(candidate)) = (current, candidate)
-                        && current < candidate
-                    {
-                        addon_versions.insert(manifest.title, new_version);
+                let new_version = manifest.version.unwrap_or_else(|| "0".to_string());
+                if let Some(version) = addon_versions.get(&dir_name) {
+                    let should_update = if version == "0" {
+                        !new_version.trim().is_empty() && new_version != "0"
+                    } else {
+                        match (Version::from(version), Version::from(&new_version)) {
+                            (Some(current), Some(candidate)) => current < candidate,
+                            (None, Some(_)) => true,
+                            _ => false,
+                        }
+                    };
+                    if should_update {
+                        addon_versions.insert(dir_name.clone(), new_version);
                     }
                 }
                 if !manifest.depends_on.is_empty() {
@@ -776,21 +781,52 @@ where i.addon_id is null
                 .await
                 .context(error::DbGetSnafu)?;
             let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
-            let mut inserts: Vec<InstalledAddon::ActiveModel> = Vec::new();
+            let mut detected_versions: HashMap<i32, String> = HashMap::new();
+
             for x in db_results.iter() {
                 let addon_id: i32 = x.try_get_by(0).context(error::DbGetSnafu)?;
                 let dir: String = x.try_get_by(2).context(error::DbGetSnafu)?;
-                inserts.push(InstalledAddon::ActiveModel {
-                    addon_id: ActiveValue::Set(addon_id),
-                    version: ActiveValue::Set(
-                        addon_versions
-                            .get(&dir)
-                            .unwrap_or(&"0".to_string())
-                            .to_string(),
-                    ),
-                    date: ActiveValue::Set(now.to_string()),
-                });
+
+                let candidate_version = addon_versions
+                    .get(&dir)
+                    .cloned()
+                    .unwrap_or_else(|| "0".to_string());
+
+                let selected_version = detected_versions
+                    .entry(addon_id)
+                    .or_insert_with(|| "0".to_string());
+
+                if candidate_version.trim().is_empty() || candidate_version == "0" {
+                    continue;
+                }
+
+                let should_update = if selected_version == "0" {
+                    true
+                } else {
+                    match (
+                        Version::from(&*selected_version),
+                        Version::from(&candidate_version),
+                    ) {
+                        (Some(current), Some(candidate)) => current < candidate,
+                        (None, Some(_)) => true,
+                        _ => false,
+                    }
+                };
+
+                if should_update {
+                    *selected_version = candidate_version;
+                }
             }
+
+            let inserts: Vec<InstalledAddon::ActiveModel> = detected_versions
+                .into_iter()
+                .map(|(addon_id, version)| InstalledAddon::ActiveModel {
+                    addon_id: ActiveValue::Set(addon_id),
+                    version: ActiveValue::Set(version),
+                    date: ActiveValue::Set(now.to_string()),
+                })
+                .collect();
+
             // 2. insert as installed, update checks will handle the rest
             if !inserts.is_empty() {
                 info!("Adding {} untracked addons", inserts.len());
