@@ -76,7 +76,7 @@ impl View for MissingDeps {
 
         // show missing deps when ready
         egui::Panel::top("top_panel")
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Missing Dependencies").heading().strong());
@@ -100,7 +100,7 @@ impl View for MissingDeps {
             return response;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (missing_dir, dep_opt) in self.missing_deps.iter_mut() {
                     ui.strong(missing_dir);

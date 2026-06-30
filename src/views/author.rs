@@ -41,7 +41,7 @@ impl View for Author {
             return response;
         }
 
-        egui::Panel::top("author_top").show_inside(ui, |ui| {
+        egui::Panel::top("author_top").show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 //close button
@@ -64,7 +64,7 @@ impl View for Author {
             return response;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let show_addons: Vec<&AddonShowDetails> =
                 self.addons.value.as_ref().unwrap().iter().collect();
             response = AddonTable::new(&show_addons).installable(true).ui(ui);

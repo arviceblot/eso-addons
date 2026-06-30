@@ -137,7 +137,7 @@ impl View for Details {
         let mut scroll_area = ScrollArea::vertical().auto_shrink([false, true]);
         let mut tab_changed = false;
 
-        egui::Panel::top("detail_top").show_inside(ui, |ui| {
+        egui::Panel::top("detail_top").show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 //close button
@@ -317,7 +317,7 @@ impl View for Details {
             self.reset_scroll = false;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             scroll_area.show(ui, |ui| match self.view {
                 DetailView::Description => {
                     if self.show_raw_text {
@@ -348,7 +348,7 @@ impl View for Details {
                     }
                     egui::Panel::left("image_left")
                         .default_size(100.0)
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             ScrollArea::vertical().show(ui, |ui| {
                                 for image in self.images.value.as_ref().unwrap() {
                                     if ui
@@ -363,7 +363,7 @@ impl View for Details {
                                 }
                             });
                         });
-                    egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
                         ui.centered_and_justified(|ui| {
                             if self.selected_image != String::default() {
                                 ui.add(Image::new(self.selected_image.to_owned()).shrink_to_fit());

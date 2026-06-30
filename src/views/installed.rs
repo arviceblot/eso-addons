@@ -133,14 +133,14 @@ impl View for Installed {
         let mut response = AddonResponse::default();
 
         if self.displayed_addons.is_empty() {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.heading("No addons installed!");
                 })
             });
         } else {
             self.handle_sort();
-            egui::Panel::top("installed_top").show_inside(ui, |ui| {
+            egui::Panel::top("installed_top").show(ui, |ui| {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     let updateable_count = self.get_updateable_addon_count();
@@ -211,7 +211,7 @@ impl View for Installed {
                     egui::Panel::bottom("installed_libraries")
                         .resizable(true)
                         .default_size(200.0)
-                        .show_inside(ui, |ui| {
+                        .show(ui, |ui| {
                             ui.add_space(5.0);
                             ui.heading(format!("Libraries - {} addons", libraries.len()));
                             ui.add_space(5.0);
@@ -222,14 +222,14 @@ impl View for Installed {
                         });
                 }
 
-                egui::CentralPanel::default().show_inside(ui, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let addon_response = AddonTable::new(&addons).installable(true).ui(ui);
                     if addon_response.response_type != AddonResponseType::default() {
                         response = addon_response;
                     }
                 });
             } else {
-                egui::CentralPanel::default().show_inside(ui, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     response = AddonTable::new(&matched).installable(true).ui(ui);
                 });
             }

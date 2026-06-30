@@ -439,7 +439,7 @@ impl eframe::App for EamApp {
 
         // if we are loading addons, show spinner and that's it
         if self.update.is_polling() || self.installed_addons.is_polling() {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 // ui.vertical_centered_justified(|ui| {
                 ui.centered_and_justified(|ui| {
                     ui.spinner();
@@ -451,7 +451,7 @@ impl eframe::App for EamApp {
 
         // check if need onboarding
         if self.service.config.onboard {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 self.onboard.ui(ctx, ui, &mut self.service);
             });
             return;
@@ -461,7 +461,7 @@ impl eframe::App for EamApp {
             .resizable(true)
             .default_size(200.0)
             .size_range(80.0..=200.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     ui.add_space(5.0);
                     ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
@@ -546,7 +546,7 @@ impl eframe::App for EamApp {
                     }
                 });
             });
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // check if need onboarding
             if self.service.config.onboard {
                 self.onboard.ui(ctx, ui, &mut self.service);
