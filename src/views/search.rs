@@ -168,7 +168,7 @@ impl View for Search {
             return response;
         }
 
-        egui::Panel::top("search_top").show_inside(ui, |ui| {
+        egui::Panel::top("search_top").show(ui, |ui| {
             self.handle_sort();
             ui.add_space(5.0);
             ui.horizontal(|ui| {
@@ -213,7 +213,7 @@ impl View for Search {
             self.previous_category = self.selected_category;
         }
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             if self.category_addons.is_polling() {
                 ui.spinner();
                 return;
