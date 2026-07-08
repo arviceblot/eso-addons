@@ -167,11 +167,21 @@ impl View for Settings {
                     ctx.global_style_mut(|style| {
                         style.visuals = Visuals::dark();
                     });
-                } else if ui.selectable_label(service.config.style == config::Style::System, RichText::new("Follow System").heading()).clicked() {
+                } else if ui.selectable_label(service.config.style == config::Style::System, RichText::new("💻 System").heading()).clicked() {
                     service.config.style = config::Style::System;
                 }
                 ui.label("requires app restart to take effect")
             });
+            let mut updates_changed = false;
+            egui::ComboBox::from_label("UI Scale").selected_text(format!("{:.2?}x", service.config.pixels_per_point)).show_ui(ui, |ui| {
+                updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 1.0, "1.0x").changed();
+                updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 1.25, "1.25x").changed();
+                updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 1.5, "1.5x").changed();
+                updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 2.0, "2.0x").changed();
+            });
+            if updates_changed {
+                ctx.set_pixels_per_point(service.config.pixels_per_point);
+            }
             ui.add_space(5.0);
 
             ui.label(RichText::new("Game AddOn folder").heading());
@@ -215,7 +225,6 @@ impl View for Settings {
 
             ui.label(RichText::new("Updates").heading());
             ui.add_space(5.0);
-            let mut updates_changed = false;
             ui.horizontal(|ui| {
                 updates_changed |= ui
                     .checkbox(

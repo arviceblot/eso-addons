@@ -131,6 +131,8 @@ pub struct Config {
     pub style: Style,
     #[serde(default)]
     pub ttc_region: TTCRegion,
+    #[serde(default = "default_1")]
+    pub pixels_per_point: f32,
 }
 impl Config {
     pub fn load() -> Config {
@@ -244,6 +246,9 @@ fn default_str() -> String {
 }
 fn default_true() -> bool {
     true
+}
+fn default_1() -> f32 {
+    1.0
 }
 
 fn default_version() -> String {

@@ -120,8 +120,8 @@ impl EamApp {
         // force repaint every 1 second for installs/updates
         cc.egui_ctx.request_repaint_after(Duration::new(1, 0));
 
-        // force ppi to 1 for correct steamdeck size
-        cc.egui_ctx.set_pixels_per_point(1.0);
+        cc.egui_ctx
+            .set_pixels_per_point(service.config.pixels_per_point);
 
         // set theme based on save config
         let style = match service.config.style {
