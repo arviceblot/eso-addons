@@ -94,12 +94,12 @@ impl MigrationTrait for Migration {
 
         // Move Addon data to tmp table to recreate new FKs
         let db = manager.get_connection();
-        db.execute(Statement::from_string(
+        db.execute_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
             r#"CREATE TABLE addon_tmp AS SELECT * FROM addon;"#.to_owned(),
         ))
         .await?;
-        db.execute(Statement::from_string(
+        db.execute_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
             r#"PRAGMA foreign_keys = OFF;"#.to_owned(),
         ))
@@ -145,13 +145,13 @@ impl MigrationTrait for Migration {
             DatabaseBackend::Sqlite,
             r#"INSERT INTO addon SELECT * FROM addon_tmp;"#.to_owned(),
         );
-        db.execute(addon_pop).await?;
+        db.execute_raw(addon_pop).await?;
         let drop_tmp = Statement::from_string(
             DatabaseBackend::Sqlite,
             r#"DROP TABLE addon_tmp;"#.to_owned(),
         );
-        db.execute(drop_tmp).await?;
-        db.execute(Statement::from_string(
+        db.execute_raw(drop_tmp).await?;
+        db.execute_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
             r#"PRAGMA foreign_keys = ON;"#.to_owned(),
         ))

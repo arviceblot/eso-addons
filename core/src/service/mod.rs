@@ -26,7 +26,7 @@ use migration::{Condition, Migrator, MigratorTrait};
 use futures::StreamExt;
 use lazy_async_promise::ImmediateValuePromise;
 use md5::{Digest, Md5};
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::{Expr, ExprTrait, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions, ConnectionTrait,
     DatabaseConnection, DbBackend, DbErr, EntityTrait, FromQueryResult, IntoActiveModel, JoinType,
@@ -773,7 +773,7 @@ where i.addon_id is null
             );
 
             let db_results = db
-                .query_all(Statement::from_sql_and_values(
+                .query_all_raw(Statement::from_sql_and_values(
                     sea_orm::DatabaseBackend::Sqlite,
                     &sql,
                     keys.iter().map(|k| k.into()).collect::<Vec<_>>(),
@@ -1960,7 +1960,7 @@ async fn resolve_dirs_to_addons<C: ConnectionTrait>(
         where ad.dir in ({placeholders})"#
     );
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             &sql,
             dirs.iter().map(|k| k.into()).collect::<Vec<_>>(),
