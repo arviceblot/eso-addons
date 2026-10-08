@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -1814,40 +1814,112 @@ where i.addon_id is null
 
             let data: BackupData = serde_json::from_str(&buf)?;
 
+            // Restore installed addons.
+            // Addons may have been removed from the site since the backup was created,
+            // so we only insert entries whose addon_id still exists in the addon table.
             if !data.installed_addons.is_empty() {
-                // remove existing installed data
+                let backup_ids: Vec<i32> =
+                    data.installed_addons.iter().map(|a| a.addon_id).collect();
+
+                // Batch-check which backup IDs still exist in the addon table
+                let existing_ids: HashSet<i32> = DbAddon::Entity::find()
+                    .filter(DbAddon::Column::Id.is_in(backup_ids.clone()))
+                    .all(&db)
+                    .await?
+                    .into_iter()
+                    .map(|a| a.id)
+                    .collect();
+
+                // Report addon IDs from the backup that no longer exist
+                let missing_ids: Vec<i32> = backup_ids
+                    .into_iter()
+                    .filter(|id| !existing_ids.contains(id))
+                    .collect();
+                if !missing_ids.is_empty() {
+                    warn!(
+                        "Backup contains {} installed addon ID(s) that no longer exist in the addon table: {:?}",
+                        missing_ids.len(),
+                        missing_ids
+                    );
+                }
+
+                // Delete existing installed addon data
                 InstalledAddon::Entity::delete_many().exec(&db).await?;
 
-                // import installed addon data
-                let mut installed_addons = vec![];
-                for x in data.installed_addons {
-                    installed_addons.push(InstalledAddon::ActiveModel {
+                // Insert only entries whose addon still exists
+                let installed_addons: Vec<InstalledAddon::ActiveModel> = data
+                    .installed_addons
+                    .iter()
+                    .filter(|a| existing_ids.contains(&a.addon_id))
+                    .map(|x| InstalledAddon::ActiveModel {
                         addon_id: ActiveValue::Set(x.addon_id),
                         version: ActiveValue::Set("0".to_owned()),
-                        date: ActiveValue::Set(x.date),
+                        date: ActiveValue::Set(x.date.clone()),
                     })
+                    .collect();
+
+                if !installed_addons.is_empty() {
+                    InstalledAddon::Entity::insert_many(installed_addons)
+                        .exec(&db)
+                        .await?;
                 }
-                InstalledAddon::Entity::insert_many(installed_addons)
-                    .exec(&db)
-                    .await?;
             }
 
             if !data.manual_dependencies.is_empty() {
-                // remove existing manual dep data
+                // Delete existing manual dep data
                 ManualDependency::Entity::delete_many().exec(&db).await?;
 
-                // import manual dep data
-                let mut dep_inserts = vec![];
-                for x in data.manual_dependencies {
-                    dep_inserts.push(ManualDependency::ActiveModel {
-                        addon_dir: ActiveValue::Set(x.addon_dir),
+                // Batch-check which satisfied_by IDs still exist in the addon table
+                let satisfied_by_ids: Vec<i32> = data
+                    .manual_dependencies
+                    .iter()
+                    .filter_map(|x| x.satisfied_by)
+                    .collect();
+
+                let existing_ids: HashSet<i32> = DbAddon::Entity::find()
+                    .filter(DbAddon::Column::Id.is_in(satisfied_by_ids.clone()))
+                    .all(&db)
+                    .await?
+                    .into_iter()
+                    .map(|a| a.id)
+                    .collect();
+
+                // Report satisfied_by IDs from the backup that no longer exist
+                let missing_ids: Vec<i32> = satisfied_by_ids
+                    .into_iter()
+                    .filter(|id| !existing_ids.contains(id))
+                    .collect();
+                if !missing_ids.is_empty() {
+                    warn!(
+                        "Backup contains {} manual dependency satisfied_by ID(s) that no longer exist in the addon table: {:?}",
+                        missing_ids.len(),
+                        missing_ids
+                    );
+                }
+
+                // Insert only entries whose referenced addon still exists.
+                // Entries with no satisfied_by or marked as ignored always pass.
+                let dep_inserts: Vec<ManualDependency::ActiveModel> = data
+                    .manual_dependencies
+                    .iter()
+                    .filter(|x| {
+                        if x.ignore.unwrap_or(false) || x.satisfied_by.is_none() {
+                            return true;
+                        }
+                        existing_ids.contains(&x.satisfied_by.unwrap())
+                    })
+                    .map(|x| ManualDependency::ActiveModel {
+                        addon_dir: ActiveValue::Set(x.addon_dir.clone()),
                         satisfied_by: ActiveValue::Set(x.satisfied_by),
                         ignore: ActiveValue::Set(x.ignore),
-                    });
+                    })
+                    .collect();
+
+                if !dep_inserts.is_empty() {
+                    ManualDependency::Entity::insert_many(dep_inserts)
+                        .exec(&db)
+                        .await?;
                 }
-                ManualDependency::Entity::insert_many(dep_inserts)
-                    .exec(&db)
-                    .await?;
             }
 
             Ok(())
