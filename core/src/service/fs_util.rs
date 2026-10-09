@@ -16,11 +16,12 @@ use crate::{
 
 static DEPENDENCY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(.+?)(([<=>]+)(.*))?$").unwrap());
-static METADATA_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"## (.*): (.*)").unwrap());
+static METADATA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"## (.*): (.*)").unwrap());
 
 fn extract_dependency(dep: &str) -> Option<String> {
-    DEPENDENCY_RE.captures(dep).map(|captures| captures[1].to_owned())
+    DEPENDENCY_RE
+        .captures(dep)
+        .map(|captures| captures[1].to_owned())
 }
 
 fn fs_open_addon_metadata_file(path: &Path, addon_name: &str) -> Result<File> {

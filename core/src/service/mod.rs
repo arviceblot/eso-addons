@@ -323,8 +323,7 @@ impl AddonService {
                 }
 
                 // AddOn Images
-                if let (Some(thumbs), Some(imgs)) = (list_item.image_thumbnails, list_item.images)
-                {
+                if let (Some(thumbs), Some(imgs)) = (list_item.image_thumbnails, list_item.images) {
                     let it = thumbs.into_iter().zip(imgs);
                     for (i, (thumb, img)) in it.enumerate() {
                         let Ok(idx) = i.try_into() else {
@@ -663,8 +662,10 @@ impl AddonService {
                         .map(|s| s.to_string())
                 })
                 .collect();
-            let mut addon_versions: HashMap<_, _> =
-                addon_dirs.into_iter().map(|d| (d, String::from("0"))).collect();
+            let mut addon_versions: HashMap<_, _> = addon_dirs
+                .into_iter()
+                .map(|d| (d, String::from("0")))
+                .collect();
 
             // now check every txt and addon file matching the directory name to get the installed version
             let parser = eso_addon_manifest::AddonManifestParser::default();
@@ -1504,12 +1505,15 @@ where i.addon_id is null
                 .split(',')
                 .filter(|x| !x.is_empty())
                 .filter_map(|raw| {
-                    raw.trim().parse::<i32>().map_err(|e| {
-                        service.record_error(
-                            format!("Importing Minion backup {}", filepath.display()),
-                            format!("Skipping non-integer addon id {raw:?}: {e}"),
-                        );
-                    }).ok()
+                    raw.trim()
+                        .parse::<i32>()
+                        .map_err(|e| {
+                            service.record_error(
+                                format!("Importing Minion backup {}", filepath.display()),
+                                format!("Skipping non-integer addon id {raw:?}: {e}"),
+                            );
+                        })
+                        .ok()
                 })
                 .collect();
             // workaround for weird behavior with promise in promise, slowly install addons one at a time

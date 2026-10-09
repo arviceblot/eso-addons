@@ -3,9 +3,8 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-static ESOU_INFO_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^https://.*esoui\.com/downloads/info(\d+)-(.+)$").unwrap()
-});
+static ESOU_INFO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^https://.*esoui\.com/downloads/info(\d+)-(.+)$").unwrap());
 static ESOU_FILEINFO_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^https://.+esoui\.com/downloads/fileinfo\.php\?id=(\d+)$").unwrap()
 });
@@ -23,8 +22,16 @@ pub struct AddonList {
 
 pub fn get_download_url(addon_url: &str) -> Option<String> {
     let fns: [fn(&str) -> Option<String>; 2] = [
-        |url: &str| ESOU_INFO_RE.captures(url).map(|captures| captures[1].to_owned()),
-        |url: &str| ESOU_FILEINFO_RE.captures(url).map(|captures| captures[1].to_owned()),
+        |url: &str| {
+            ESOU_INFO_RE
+                .captures(url)
+                .map(|captures| captures[1].to_owned())
+        },
+        |url: &str| {
+            ESOU_FILEINFO_RE
+                .captures(url)
+                .map(|captures| captures[1].to_owned())
+        },
     ];
 
     for f in fns {

@@ -28,7 +28,9 @@ where
 {
     let desired_map: HashSet<_> = desired.iter().map(|a| &a.name).collect();
 
-    installed.filter(|addon| !desired_map.contains(&addon.name)).collect()
+    installed
+        .filter(|addon| !desired_map.contains(&addon.name))
+        .collect()
 }
 
 pub fn get_unused_dependencies(installed: &[Addon], desired: &[AddonEntry]) -> Vec<String> {
@@ -38,7 +40,10 @@ pub fn get_unused_dependencies(installed: &[Addon], desired: &[AddonEntry]) -> V
         dep_graph.entry(addon.name.clone()).or_default();
 
         for dependency in &addon.depends_on {
-            dep_graph.entry(dependency.clone()).or_default().insert(addon.name.clone());
+            dep_graph
+                .entry(dependency.clone())
+                .or_default()
+                .insert(addon.name.clone());
         }
     }
 
