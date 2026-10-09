@@ -1,6 +1,13 @@
 use crate::error::Error;
 use regex::Regex;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+static ESOU_INFO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^https://.*esoui\.com/downloads/info(\d+)-(.+)$").unwrap());
+static ESOU_FILEINFO_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^https://.+esoui\.com/downloads/fileinfo\.php\?id=(\d+)$").unwrap()
+});
 
 #[derive(Debug)]
 pub struct Addon {
@@ -14,15 +21,16 @@ pub struct AddonList {
 }
 
 pub fn get_download_url(addon_url: &str) -> Option<String> {
-    let fns: Vec<fn(&str) -> Option<String>> = vec![
+    let fns: [fn(&str) -> Option<String>; 2] = [
         |url: &str| {
-            let re = Regex::new(r"^https://.*esoui\.com/downloads/info(\d+)-(.+)$").unwrap();
-            re.captures(url).map(|captures| captures[1].to_owned())
+            ESOU_INFO_RE
+                .captures(url)
+                .map(|captures| captures[1].to_owned())
         },
         |url: &str| {
-            let re =
-                Regex::new(r"^https://.+esoui\.com/downloads/fileinfo\.php\?id=(\d+)$").unwrap();
-            re.captures(url).map(|captures| captures[1].to_owned())
+            ESOU_FILEINFO_RE
+                .captures(url)
+                .map(|captures| captures[1].to_owned())
         },
     ];
 
