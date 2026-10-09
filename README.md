@@ -16,8 +16,9 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 - Specific support for ESO on the Steam Deck through Flathub
 - Automatically detect already installed addons
 - Options to auto update Tamriel Trade Centre prices and HarvestMap data
-- Light and dark UI themes
-- No Java!
+- Light, dark, and system-matching UI themes
+- Configurable UI scaling for high-DPI displays
+- Backup and restore your managed addon list to/from a JSON file
 - Import managed addons from Minion
 - Suggest installing addons for any missing dependencies
 
@@ -60,6 +61,13 @@ flatpak run com.arviceblot.eso-addon-manager
 ```shell
 cargo run eso-addon-manager
 ```
+
+## Troubleshooting
+
+- Use **Clear Cache** in Settings to reset the local data cache
+- Use **Backup** / **Restore** to export and re-import your managed addon list
+- Logs are available in the config directory (linked in Settings)
+- Report issues on [GitHub](https://github.com/arviceblot/eso-addons/issues)
 
 ## Legacy
 
