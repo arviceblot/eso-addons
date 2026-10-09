@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -49,8 +50,13 @@ const TTC_EU_DOMAIN: &str = "eu.tamrieltradecentre.com";
 
 /// Safe upper bound for SQLite bound parameters per statement (SQLITE_MAX_VARIABLE_NUMBER).
 /// Defaults to 32766 on 3.32.0+ (bundled by libsqlite3-sys); 32000 leaves headroom.
-/// Only relevant for `IN (?, ?, ...)` clauses — row inserts run as per-row prepared statements.
+/// Used for both `IN (?, ?, ...)` clauses and batch `INSERT … VALUES (…), (…), …`.
 const SQLITE_MAX_VARS: usize = 32000;
+
+/// Maximum rows per batched `insert_many()` chunk.
+/// Based on the widest table (addon: 13 columns) so every entity stays under SQLITE_MAX_VARS
+/// even if the schema adds columns later. SeaORM doesn't expose column counts at compile time.
+const INSERT_CHUNK: usize = SQLITE_MAX_VARS / 13;
 
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
@@ -261,12 +267,12 @@ impl AddonService {
             // update addons
             let file_list = service.api.get_file_list().await?;
 
-            let mut insert_addons = vec![];
+            let mut insert_addons = Vec::with_capacity(file_list.len());
             let mut insert_addon_dirs = vec![];
             let mut insert_compats = vec![];
             let mut insert_imgs = vec![];
-            let mut addon_ids = vec![];
-            for list_item in file_list.iter() {
+            let mut addon_ids = Vec::with_capacity(file_list.len());
+            for list_item in file_list.into_iter() {
                 let addon_id: i32 = match list_item.id.parse() {
                     Ok(id) => id,
                     Err(e) => {
@@ -277,30 +283,30 @@ impl AddonService {
                 addon_ids.push(addon_id);
                 let addon = DbAddon::ActiveModel {
                     id: ActiveValue::Set(addon_id),
-                    category_id: ActiveValue::Set(list_item.category.to_owned()),
-                    version: ActiveValue::Set(list_item.version.to_owned()),
+                    category_id: ActiveValue::Set(list_item.category),
+                    version: ActiveValue::Set(list_item.version),
                     date: ActiveValue::Set(list_item.date.to_string()),
-                    name: ActiveValue::Set(list_item.name.to_owned()),
-                    author_name: ActiveValue::Set(Some(list_item.author_name.to_owned())),
-                    file_info_url: ActiveValue::Set(Some(list_item.file_info_url.to_owned())),
-                    download_total: ActiveValue::Set(Some(list_item.download_total.to_owned())),
-                    download_monthly: ActiveValue::Set(Some(list_item.download_monthly.to_owned())),
-                    favorite_total: ActiveValue::Set(Some(list_item.favorite_total.to_owned())),
+                    name: ActiveValue::Set(list_item.name),
+                    author_name: ActiveValue::Set(Some(list_item.author_name)),
+                    file_info_url: ActiveValue::Set(Some(list_item.file_info_url)),
+                    download_total: ActiveValue::Set(Some(list_item.download_total)),
+                    download_monthly: ActiveValue::Set(Some(list_item.download_monthly)),
+                    favorite_total: ActiveValue::Set(Some(list_item.favorite_total)),
                     ..Default::default()
                 };
 
                 // AddOn Directories
-                for addon_dir in list_item.directories.iter() {
+                for addon_dir in list_item.directories.into_iter() {
                     let addon_dir_model = AddonDir::ActiveModel {
                         addon_id: ActiveValue::Set(addon_id),
-                        dir: ActiveValue::Set(addon_dir.to_string()),
+                        dir: ActiveValue::Set(addon_dir),
                     };
                     insert_addon_dirs.push(addon_dir_model);
                 }
 
                 // Game Compatibility
-                if let Some(compats) = &list_item.compatibility {
-                    for (index, item) in compats.iter().enumerate() {
+                if let Some(compats) = list_item.compatibility {
+                    for (index, item) in compats.into_iter().enumerate() {
                         let Ok(idx) = index.try_into() else {
                             warn!(
                                 "Skipping compat entry {index} for addon {addon_id} (index out of range)"
@@ -310,16 +316,16 @@ impl AddonService {
                         insert_compats.push(GameCompat::ActiveModel {
                             addon_id: ActiveValue::Set(addon_id),
                             id: ActiveValue::Set(idx),
-                            version: ActiveValue::Set(item.version.to_owned()),
-                            name: ActiveValue::Set(item.name.to_owned()),
+                            version: ActiveValue::Set(item.version),
+                            name: ActiveValue::Set(item.name),
                         });
                     }
                 }
 
                 // AddOn Images
-                if let (Some(thumbs), Some(imgs)) = (&list_item.image_thumbnails, &list_item.images)
+                if let (Some(thumbs), Some(imgs)) = (list_item.image_thumbnails, list_item.images)
                 {
-                    let it = thumbs.iter().zip(imgs.iter());
+                    let it = thumbs.into_iter().zip(imgs);
                     for (i, (thumb, img)) in it.enumerate() {
                         let Ok(idx) = i.try_into() else {
                             warn!("Skipping image {i} for addon {addon_id} (index out of range)");
@@ -328,8 +334,8 @@ impl AddonService {
                         insert_imgs.push(AddonImage::ActiveModel {
                             addon_id: ActiveValue::Set(addon_id),
                             index: ActiveValue::Set(idx),
-                            thumbnail: ActiveValue::Set(thumb.to_owned()),
-                            image: ActiveValue::Set(img.to_owned()),
+                            thumbnail: ActiveValue::Set(thumb),
+                            image: ActiveValue::Set(img),
                         })
                     }
                 }
@@ -351,8 +357,9 @@ impl AddonService {
                     DbAddon::Column::FavoriteTotal,
                 ])
                 .to_owned();
-            for addon in insert_addons {
-                DbAddon::Entity::insert(addon)
+            // Chunk batch inserts to stay under SQLITE_MAX_VARS.
+            for chunk in insert_addons.chunks(INSERT_CHUNK) {
+                DbAddon::Entity::insert_many(chunk.to_vec())
                     .on_conflict(addon_on_conflict.clone())
                     .exec(&txn)
                     .await
@@ -379,20 +386,20 @@ impl AddonService {
                     .context(error::DbDeleteSnafu)?;
             }
 
-            for dir in insert_addon_dirs {
-                AddonDir::Entity::insert(dir)
+            for chunk in insert_addon_dirs.chunks(INSERT_CHUNK) {
+                AddonDir::Entity::insert_many(chunk.to_vec())
                     .exec(&txn)
                     .await
                     .context(error::DbPutSnafu)?;
             }
-            for compat in insert_compats {
-                GameCompat::Entity::insert(compat)
+            for chunk in insert_compats.chunks(INSERT_CHUNK) {
+                GameCompat::Entity::insert_many(chunk.to_vec())
                     .exec(&txn)
                     .await
                     .context(error::DbPutSnafu)?;
             }
-            for img in insert_imgs {
-                AddonImage::Entity::insert(img)
+            for chunk in insert_imgs.chunks(INSERT_CHUNK) {
+                AddonImage::Entity::insert_many(chunk.to_vec())
                     .exec(&txn)
                     .await
                     .context(error::DbPutSnafu)?;
@@ -480,9 +487,10 @@ impl AddonService {
     async fn update_categories(&self) -> Result<()> {
         info!("Updating categories");
         let categories = self.api.get_categories().await?;
-        let mut insert_categories = vec![];
+        let insert_categories = Vec::with_capacity(categories.len());
+        let mut insert_categories = insert_categories;
         let mut category_parents = vec![];
-        for category in categories.iter() {
+        for category in categories.into_iter() {
             let Ok(cat_id) = category.id.parse() else {
                 warn!("Skipping category with non-integer id {:?}", category.id);
                 continue;
@@ -490,13 +498,13 @@ impl AddonService {
             let file_count = category.file_count.parse().ok();
             let db_category = Category::ActiveModel {
                 id: ActiveValue::Set(cat_id),
-                title: ActiveValue::Set(category.title.to_owned()),
-                icon: ActiveValue::Set(Some(category.icon.to_owned())),
+                title: ActiveValue::Set(category.title),
+                icon: ActiveValue::Set(Some(category.icon)),
                 file_count: ActiveValue::Set(file_count),
             };
             insert_categories.push(db_category);
 
-            for parent_id in category.parent_ids.iter() {
+            for parent_id in category.parent_ids.into_iter() {
                 let Ok(parent) = parent_id.parse() else {
                     warn!("Skipping non-integer parent id {parent_id:?} for category {cat_id}");
                     continue;
@@ -655,10 +663,8 @@ impl AddonService {
                         .map(|s| s.to_string())
                 })
                 .collect();
-            let mut addon_versions = HashMap::new();
-            for addon_dir in addon_dirs {
-                addon_versions.insert(addon_dir, "0".to_string());
-            }
+            let mut addon_versions: HashMap<_, _> =
+                addon_dirs.into_iter().map(|d| (d, String::from("0"))).collect();
 
             // now check every txt and addon file matching the directory name to get the installed version
             let parser = eso_addon_manifest::AddonManifestParser::default();
@@ -781,7 +787,8 @@ where i.addon_id is null
                 .await
                 .context(error::DbGetSnafu)?;
             let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
-            let mut detected_versions: HashMap<i32, String> = HashMap::new();
+            let mut detected_versions: HashMap<i32, String> =
+                HashMap::with_capacity(db_results.len());
 
             for x in db_results.iter() {
                 let addon_id: i32 = x.try_get_by(0).context(error::DbGetSnafu)?;
@@ -843,7 +850,8 @@ where i.addon_id is null
                 let parent_dirs: Vec<String> = nested_dirs.keys().cloned().collect();
                 let parent_to_addon = resolve_dirs_to_addons(&db, &parent_dirs).await?;
 
-                let mut dir_inserts: Vec<AddonDir::ActiveModel> = Vec::new();
+                let mut dir_inserts: Vec<AddonDir::ActiveModel> =
+                    Vec::with_capacity(nested_dirs.values().map(|v| v.len()).sum());
                 for (parent, subs) in nested_dirs {
                     let Some(&addon_id) = parent_to_addon.get(&parent) else {
                         continue;
@@ -884,7 +892,8 @@ where i.addon_id is null
                         .context(error::DbDeleteSnafu)?;
                 }
 
-                let mut dep_inserts: Vec<AddonDep::ActiveModel> = Vec::new();
+                let mut dep_inserts: Vec<AddonDep::ActiveModel> =
+                    Vec::with_capacity(manifest_deps.values().map(|v| v.len()).sum());
                 for (dir, deps) in manifest_deps {
                     let Some(&addon_id) = addon_for_dir.get(&dir) else {
                         continue;
@@ -1015,7 +1024,7 @@ where i.addon_id is null
                 .all(&db)
                 .await
                 .context(error::DbGetSnafu)?;
-            let dep_dirs: Vec<String> = dep_rows.iter().map(|r| r.dependency_dir.clone()).collect();
+            let dep_dirs: Vec<String> = dep_rows.into_iter().map(|r| r.dependency_dir).collect();
 
             let dependents = AddonRef::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
@@ -1069,8 +1078,8 @@ where i.addon_id is null
                     .context(error::DbGetSnafu)?
             };
             let satisfied_name_map: HashMap<i32, String> = satisfied_addons
-                .iter()
-                .map(|a| (a.id, a.name.clone()))
+                .into_iter()
+                .map(|a| (a.id, a.name))
                 .collect();
 
             let placeholders = vec!["?"; dep_dirs.len()].join(",");
@@ -1130,7 +1139,8 @@ where i.addon_id is null
             .all(&db)
             .await
             .context(error::DbGetSnafu)?;
-            let mut suggestion_map: HashMap<String, Vec<AddonRef>> = HashMap::new();
+            let mut suggestion_map: HashMap<String, Vec<AddonRef>> =
+                HashMap::with_capacity(suggestion_rows.len());
             for row in suggestion_rows {
                 suggestion_map.entry(row.dir).or_default().push(AddonRef {
                     id: row.id,
@@ -1361,10 +1371,10 @@ where i.addon_id is null
                 }
                 hasher.update(&buffer[..bytes_read]);
             }
-            let hash = hasher.finalize().to_vec();
-            let mut hash_string = String::new();
+            let hash = hasher.finalize();
+            let mut hash_string = String::with_capacity(32);
             for x in hash.iter() {
-                hash_string.push_str(format!("{x:02x}").as_str());
+                write!(hash_string, "{x:02x}").unwrap();
             }
             if md5 != hash_string {
                 warn!("Expected file hash {md5}, got {hash_string}");
@@ -1490,22 +1500,22 @@ where i.addon_id is null
 
         ImmediateValuePromise::new(async move {
             let line = fs::read_to_string(&filepath)?;
-            let mut ids: Vec<i32> = Vec::new();
-            for raw in line.split(',').filter(|x| !x.is_empty()) {
-                match raw.trim().parse::<i32>() {
-                    Ok(id) => ids.push(id),
-                    Err(e) => {
+            let ids: Vec<i32> = line
+                .split(',')
+                .filter(|x| !x.is_empty())
+                .filter_map(|raw| {
+                    raw.trim().parse::<i32>().map_err(|e| {
                         service.record_error(
                             format!("Importing Minion backup {}", filepath.display()),
                             format!("Skipping non-integer addon id {raw:?}: {e}"),
                         );
-                    }
-                }
-            }
+                    }).ok()
+                })
+                .collect();
             // workaround for weird behavior with promise in promise, slowly install addons one at a time
-            for addon_id in ids.iter() {
-                if let Err(e) = service.p_install(*addon_id, false).await {
-                    let label = service.addon_label(*addon_id).await;
+            for addon_id in ids {
+                if let Err(e) = service.p_install(addon_id, false).await {
+                    let label = service.addon_label(addon_id).await;
                     service.record_error(format!("Error installing {label}"), e);
                 }
             }
@@ -1539,8 +1549,8 @@ where i.addon_id is null
                 .all(&db)
                 .await
                 .context(error::DbGetSnafu)?;
-            let mut results: Vec<ParentCategory> = vec![];
-            for parent in parents.iter() {
+            let mut results: Vec<ParentCategory> = Vec::with_capacity(parents.len());
+            for parent in parents {
                 let children = Category::Entity::find()
                     .join_rev(
                         JoinType::InnerJoin,
@@ -1553,7 +1563,7 @@ where i.addon_id is null
                     .context(error::DbGetSnafu)?;
                 results.push(ParentCategory {
                     id: parent.id,
-                    title: parent.title.to_string(),
+                    title: parent.title,
                     child_categories: children,
                 });
             }
@@ -1602,11 +1612,11 @@ where i.addon_id is null
     ) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
-            let mut dep_inserts = vec![];
+            let mut dep_inserts = Vec::with_capacity(dep_results.len());
             // install selected IDs if not installed
-            for dep_opt in dep_results.iter() {
+            for dep_opt in dep_results {
                 let mut dep_insert = ManualDependency::ActiveModel {
-                    addon_dir: ActiveValue::Set(dep_opt.missing_dir.clone()),
+                    addon_dir: ActiveValue::Set(dep_opt.missing_dir),
                     ignore: ActiveValue::Set(None),
                     satisfied_by: ActiveValue::Set(None),
                 };
@@ -1684,9 +1694,9 @@ where i.addon_id is null
                 // changed since our last sync.
                 let mut hasher = Md5::new();
                 hasher.update(data.as_bytes());
-                let mut hash = String::new();
+                let mut hash = String::with_capacity(32);
                 for x in hasher.finalize().iter() {
-                    hash.push_str(format!("{x:02x}").as_str());
+                    write!(hash, "{x:02x}").unwrap();
                 }
 
                 let mut out_file = addon_dir.join("Modules");
@@ -1849,12 +1859,12 @@ where i.addon_id is null
                 // Insert only entries whose addon still exists
                 let installed_addons: Vec<InstalledAddon::ActiveModel> = data
                     .installed_addons
-                    .iter()
+                    .into_iter()
                     .filter(|a| existing_ids.contains(&a.addon_id))
                     .map(|x| InstalledAddon::ActiveModel {
                         addon_id: ActiveValue::Set(x.addon_id),
                         version: ActiveValue::Set("0".to_owned()),
-                        date: ActiveValue::Set(x.date.clone()),
+                        date: ActiveValue::Set(x.date),
                     })
                     .collect();
 
@@ -1901,7 +1911,7 @@ where i.addon_id is null
                 // Entries with no satisfied_by or marked as ignored always pass.
                 let dep_inserts: Vec<ManualDependency::ActiveModel> = data
                     .manual_dependencies
-                    .iter()
+                    .into_iter()
                     .filter(|x| {
                         if x.ignore.unwrap_or(false) || x.satisfied_by.is_none() {
                             return true;
@@ -1909,7 +1919,7 @@ where i.addon_id is null
                         existing_ids.contains(&x.satisfied_by.unwrap())
                     })
                     .map(|x| ManualDependency::ActiveModel {
-                        addon_dir: ActiveValue::Set(x.addon_dir.clone()),
+                        addon_dir: ActiveValue::Set(x.addon_dir),
                         satisfied_by: ActiveValue::Set(x.satisfied_by),
                         ignore: ActiveValue::Set(x.ignore),
                     })

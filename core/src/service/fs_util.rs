@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use entity::addon_dir as AddonDir;
@@ -13,9 +14,13 @@ use crate::{
     error::{self, Result},
 };
 
+static DEPENDENCY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(.+?)(([<=>]+)(.*))?$").unwrap());
+static METADATA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"## (.*): (.*)").unwrap());
+
 fn extract_dependency(dep: &str) -> Option<String> {
-    let re = Regex::new(r"^(.+?)(([<=>]+)(.*))?$").unwrap();
-    re.captures(dep).map(|captures| captures[1].to_owned())
+    DEPENDENCY_RE.captures(dep).map(|captures| captures[1].to_owned())
 }
 
 fn fs_open_addon_metadata_file(path: &Path, addon_name: &str) -> Result<File> {
@@ -53,7 +58,7 @@ pub fn fs_read_addon(path: &Path) -> Result<Addon> {
     }
     let addon_file = file.unwrap();
 
-    let re = Regex::new(r"## (.*): (.*)").unwrap();
+    let re = &METADATA_RE;
 
     let reader = BufReader::new(addon_file);
     for line in reader.lines().map_while(Result::ok) {

@@ -10,20 +10,14 @@ pub mod error;
 pub mod service;
 
 pub fn get_missing_dependencies(installed: &[Addon]) -> impl Iterator<Item = String> {
-    let mut missing = HashSet::new();
+    let addon_map: HashSet<_> = installed.iter().map(|a| a.name.clone()).collect();
 
-    let mut addon_map = HashSet::new();
-    for addon in installed.iter() {
-        addon_map.insert(addon.name.clone());
-    }
-
-    for addon in installed.iter() {
-        for dependency in addon.depends_on.iter() {
-            if !addon_map.contains(dependency) {
-                missing.insert(dependency.to_owned());
-            }
-        }
-    }
+    let missing: HashSet<_> = installed
+        .iter()
+        .flat_map(|a| a.depends_on.iter())
+        .filter(|dep| !addon_map.contains(*dep))
+        .map(ToOwned::to_owned)
+        .collect();
 
     missing.into_iter()
 }
@@ -32,53 +26,31 @@ pub fn get_unmanaged_addons<'a, I>(desired: &[AddonEntry], installed: I) -> Vec<
 where
     I: Iterator<Item = &'a Addon>,
 {
-    let mut result = vec![];
+    let desired_map: HashSet<_> = desired.iter().map(|a| &a.name).collect();
 
-    let mut desired_map = HashSet::new();
-    for addon in desired.iter() {
-        desired_map.insert(addon.name.clone());
-    }
-
-    for addon in installed {
-        if !desired_map.contains(&addon.name) {
-            result.push(addon);
-        }
-    }
-
-    result
+    installed.filter(|addon| !desired_map.contains(&addon.name)).collect()
 }
 
 pub fn get_unused_dependencies(installed: &[Addon], desired: &[AddonEntry]) -> Vec<String> {
     let mut dep_graph: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for addon in installed.iter() {
-        if !dep_graph.contains_key(&addon.name) {
-            dep_graph.insert(addon.name.clone(), HashSet::new());
-        }
+    for addon in installed {
+        dep_graph.entry(addon.name.clone()).or_default();
 
-        for dependency in addon.depends_on.iter() {
-            match dep_graph.get_mut(dependency) {
-                Some(set) => {
-                    set.insert(addon.name.to_owned());
-                }
-                None => {
-                    let mut set = HashSet::new();
-                    set.insert(addon.name.to_owned());
-                    dep_graph.insert(dependency.to_owned(), set);
-                }
-            }
+        for dependency in &addon.depends_on {
+            dep_graph.entry(dependency.clone()).or_default().insert(addon.name.clone());
         }
     }
 
     let mut unused_addons = vec![];
 
-    for (addon, dependency_for) in dep_graph.iter() {
+    for (addon, dependency_for) in &dep_graph {
         if dependency_for.is_empty() {
             let addon_config = desired.iter().find(|x| x.name == *addon);
             let unused = addon_config.map(|x| x.dependency).unwrap_or(true);
 
             if unused {
-                unused_addons.push(addon.to_owned())
+                unused_addons.push(addon.clone());
             }
         }
     }
