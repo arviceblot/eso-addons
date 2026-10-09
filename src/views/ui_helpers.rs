@@ -10,7 +10,7 @@ use eframe::{
 };
 use eso_addons_core::service::AddonService;
 use eso_addons_core::service::result::{AddonShowDetails, MissingDepView};
-use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
+use lazy_async_promise::{DirectCacheAccess, ImmediateValuePromise, ImmediateValueState};
 use strum_macros::EnumIter;
 
 #[derive(
@@ -82,21 +82,21 @@ pub enum ViewOpt {
 }
 
 #[derive(Default)]
-pub struct PromisedValue<T: Send + Clone + Default + 'static> {
+pub struct PromisedValue<T: Send + 'static> {
     promise: Option<ImmediateValuePromise<T>>,
     pub value: Option<T>,
     error: Option<String>,
     handled: bool,
 }
-impl<T: Send + Clone + Default> PromisedValue<T> {
+impl<T: Send + 'static> PromisedValue<T> {
     pub fn poll(&mut self) {
         if self.promise.is_none() {
             return;
         }
-        let state = self.promise.as_mut().unwrap().poll_state();
+        let state = self.promise.as_mut().unwrap().poll_state_mut();
         match state {
-            ImmediateValueState::Success(state) => {
-                self.value = Some(state.clone());
+            ImmediateValueState::Success(_) => {
+                self.value = state.take_value();
                 self.promise = None;
             }
             ImmediateValueState::Error(e) => {
