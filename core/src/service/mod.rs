@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
-use self::fs_util::{fs_delete_addon, fs_read_addon};
+use self::fs_util::{fs_delete_addon, fs_has_addon_manifest, fs_read_addon};
 use self::result::*;
 use crate::addons::{Addon, get_root_dir};
 use crate::api::ApiClient;
@@ -43,6 +43,7 @@ use zip::ZipArchive;
 
 mod backup;
 mod fs_util;
+mod git;
 pub mod result;
 
 const TTC_NA_DOMAIN: &str = "us.tamrieltradecentre.com";
@@ -64,6 +65,7 @@ pub struct AddonService {
     pub config: config::Config,
     pub db: DatabaseConnection,
     pub errors: Arc<Mutex<Vec<ErrorRecord>>>,
+    pub git_available: bool,
 }
 impl AddonService {
     pub async fn new() -> Self {
@@ -102,6 +104,7 @@ impl AddonService {
             config,
             db,
             errors: Arc::new(Mutex::new(Vec::new())),
+            git_available: git::is_available(),
         }
     }
 
@@ -1747,6 +1750,78 @@ where i.addon_id is null
             Ok(update)
         })
     }
+
+    pub fn pull_git_repositories(&self) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Pulling Git repositories");
+            tokio::task::spawn_blocking(move || service.p_pull_git_repositories()).await?;
+            Ok(())
+        })
+    }
+
+    fn p_find_git_repositories(&self) -> Vec<PathBuf> {
+        let addon_dir = self.get_addon_dir();
+        let mut repositories = Vec::new();
+        let mut walker = WalkDir::new(&addon_dir).into_iter();
+        while let Some(entry) = walker.next() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.record_error(
+                        format!(
+                            "Scanning Git repositories at {}",
+                            error.path().unwrap_or(&addon_dir).display()
+                        ),
+                        error,
+                    );
+                    continue;
+                }
+            };
+            let path = entry.path();
+
+            if (entry.depth() == 0 || entry.file_type().is_dir()) && path.join(".jj").exists() {
+                info!("Skipping Jujutsu workspace {}", path.display());
+                walker.skip_current_dir();
+                continue;
+            }
+
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            if path.join(".git").exists() {
+                repositories.push(path.to_owned());
+                walker.skip_current_dir();
+                continue;
+            }
+
+            match fs_has_addon_manifest(path) {
+                Ok(true) => walker.skip_current_dir(),
+                Ok(false) => {}
+                Err(error) => {
+                    self.record_error(
+                        format!("Scanning Git repositories at {}", path.display()),
+                        error,
+                    );
+                    walker.skip_current_dir();
+                }
+            }
+        }
+
+        repositories
+    }
+
+    fn p_pull_git_repositories(&self) {
+        let repositories = self.p_find_git_repositories();
+        for path in repositories {
+            if let Err(error) = git::pull_repository(&path) {
+                self.record_error(format!("Pulling Git repository {}", path.display()), error);
+            }
+        }
+        info!("Done pulling Git repositories!");
+    }
+
     pub fn get_addons_by_author(
         &self,
         author: String,

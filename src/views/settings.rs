@@ -296,6 +296,18 @@ impl View for Settings {
                     last.format("%Y-%m-%d %H:%M UTC")
                 ));
             }
+            ui.horizontal(|ui| {
+                updates_changed |= ui
+                    .add_enabled(
+                        service.git_available,
+                        egui::Checkbox::new(
+                            &mut service.config.pull_git_repositories,
+                            "Pull Git repositories",
+                        ),
+                    )
+                    .changed();
+                ui.label("(requires Git to be available in PATH)");
+            });
             if updates_changed {
                 service.save_config();
             }
