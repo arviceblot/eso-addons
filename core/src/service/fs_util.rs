@@ -44,6 +44,24 @@ fn fs_open_addon_metadata_file(path: &Path, addon_name: &str) -> Result<File> {
     }
 }
 
+pub fn fs_has_addon_manifest(path: &Path) -> Result<bool> {
+    for child in fs::read_dir(path).context(error::AddonDirReadSnafu { dir: path })? {
+        let child = child.context(error::AddonDirReadSnafu { dir: path })?;
+        let child_path = child.path();
+        let extension = child_path.extension().and_then(|ext| ext.to_str());
+        let is_file = child
+            .file_type()
+            .context(error::AddonDirMetadataSnafu { dir: &child_path })?
+            .is_file();
+
+        if extension == Some("addon") && is_file {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 pub fn fs_read_addon(path: &Path) -> Result<Addon> {
     let addon_name = path.file_name().unwrap().to_str().unwrap();
     let mut addon = Addon {

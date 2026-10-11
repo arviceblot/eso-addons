@@ -128,6 +128,8 @@ pub struct Config {
     #[serde(default)]
     pub hm_last_sync: Option<DateTime<Utc>>,
     #[serde(default)]
+    pub pull_git_repositories: bool,
+    #[serde(default)]
     pub style: Style,
     #[serde(default)]
     pub ttc_region: TTCRegion,

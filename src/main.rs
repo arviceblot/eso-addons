@@ -101,6 +101,7 @@ struct EamApp {
     update: PromisedValue<UpdateResult>,
     ttc_pricetable: PromisedValue<config::TtcConfigUpdate>,
     hm_data: Option<ImmediateValuePromise<config::HmConfigUpdate>>,
+    git_pull: PromisedValue<()>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
     /// Only auto-nav to MissingDeps when newly discovered, not on every refresh.
@@ -157,6 +158,7 @@ impl EamApp {
             update: PromisedValue::default(),
             ttc_pricetable: PromisedValue::default(),
             hm_data: None,
+            git_pull: PromisedValue::default(),
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
             had_missing_deps: false,
@@ -174,6 +176,10 @@ impl EamApp {
             // check HarvestMap data
             if app.service.config.update_hm_data {
                 app.hm_data = Some(app.service.update_hm_data());
+            }
+            // pull Git repositories
+            if app.service.config.pull_git_repositories && app.service.git_available {
+                app.git_pull.set(app.service.pull_git_repositories());
             }
             app.get_installed_addons();
         }
@@ -217,6 +223,14 @@ impl EamApp {
                 }
                 ImmediateValueState::Empty => {}
             }
+        }
+
+        self.git_pull
+            .poll_recording(&self.service, "Pulling Git repositories");
+        if self.git_pull.is_ready() && !self.installed_addons.is_polling() {
+            self.git_pull.handle();
+            info!("Finished pulling Git repositories.");
+            self.get_installed_addons();
         }
 
         if self.update_one.is_empty() {
@@ -383,6 +397,13 @@ impl EamApp {
         if self.service.config.update_hm_data {
             self.hm_data = Some(self.service.update_hm_data());
         }
+        // pull Git repositories
+        if self.service.config.pull_git_repositories
+            && self.service.git_available
+            && !self.git_pull.is_polling()
+        {
+            self.git_pull.set(self.service.pull_git_repositories());
+        }
     }
 
     fn get_installed_addons(&mut self) {
@@ -526,6 +547,12 @@ impl eframe::App for EamApp {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label("Updating HarvestMap data");
+                        });
+                    }
+                    if self.git_pull.is_polling() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Pulling Git repositories");
                         });
                     }
                     let installing_count =
