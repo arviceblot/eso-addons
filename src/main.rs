@@ -308,8 +308,6 @@ impl EamApp {
                     id: a.id,
                     name: a.title.clone(),
                     author: a.author.clone(),
-                    version: a.version.clone().unwrap_or_default(),
-                    installed_version: None,
                     is_upgradable: false,
                     category: a.category.clone().unwrap_or_else(|| "Addons".to_string()),
                     category_icon: None,
@@ -317,6 +315,7 @@ impl EamApp {
                         local_addon_id: a.id,
                     },
                     esoui_match_id: a.esoui_match_id,
+                    date: None,
                     download_total: None,
                     download_monthly: None,
                     favorite_total: None,
@@ -329,11 +328,6 @@ impl EamApp {
                     id: a.id,
                     name: a.title.clone(),
                     author: a.author.clone(),
-                    version: a
-                        .remote_version
-                        .clone()
-                        .unwrap_or_else(|| a.version.clone().unwrap_or_default()),
-                    installed_version: a.version.clone(),
                     is_upgradable: a.is_upgradable,
                     category: a.category.clone().unwrap_or_else(|| "Addons".to_string()),
                     category_icon: None,
@@ -342,6 +336,7 @@ impl EamApp {
                         url: a.repo_url.clone(),
                     },
                     esoui_match_id: None,
+                    date: None,
                     download_total: None,
                     download_monthly: None,
                     favorite_total: None,
