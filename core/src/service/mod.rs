@@ -1168,7 +1168,7 @@ impl AddonService {
                 None => continue,
             };
 
-            if (file.name()).ends_with('/') {
+            if file.is_dir() {
                 fs::create_dir_all(&outpath)
                     .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             } else {
