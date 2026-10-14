@@ -15,6 +15,7 @@ A cross-platform, unofficial addon manager for The Elder Scrolls Online compatib
 - Cross-platform support for Linux, macOS, and Windows
 - Specific support for ESO on the Steam Deck through Flathub
 - Automatically detect already installed addons
+- Manage addons from git repositories and manual sources
 - Options to auto update Tamriel Trade Centre prices and HarvestMap data
 - Light, dark, and system-matching UI themes
 - Configurable UI scaling for high-DPI displays
