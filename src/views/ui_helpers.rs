@@ -524,7 +524,7 @@ pub fn ui_show_star(ui: &mut egui::Ui) {
 pub enum InstalledSort {
     Name,
     Author,
-    Version,
+    Date,
     TotalDownloads,
     MonthlyDownloads,
     Favorites,
@@ -536,7 +536,7 @@ impl fmt::Display for InstalledSort {
         match self {
             InstalledSort::Name => write!(f, "Name"),
             InstalledSort::Author => write!(f, "Author"),
-            InstalledSort::Version => write!(f, "Version"),
+            InstalledSort::Date => write!(f, "Date"),
             InstalledSort::TotalDownloads => write!(f, "Downloads"),
             InstalledSort::MonthlyDownloads => write!(f, "Monthly"),
             InstalledSort::Favorites => write!(f, "Likes"),
@@ -555,6 +555,7 @@ impl InstalledSort {
                 | InstalledSort::Favorites
                 | InstalledSort::Id
         )
+        // Date defaults descending (newest first), like Sort::Updated
     }
 }
 
@@ -564,8 +565,6 @@ pub struct InstalledAddonRow {
     pub id: i64,
     pub name: String,
     pub author: Option<String>,
-    pub version: String,
-    pub installed_version: Option<String>,
     pub is_upgradable: bool,
     /// Category string ("Addons" or "Libraries")
     pub category: String,
@@ -575,6 +574,8 @@ pub struct InstalledAddonRow {
     pub source: InstalledAddonSource,
     /// ESOUI addon ID if this local addon can be promoted. Only set for Local source.
     pub esoui_match_id: Option<i64>,
+    /// Date string from ESOUI (None for local/git addons)
+    pub date: Option<String>,
     /// Total downloads (for gold star display; only ESOUI addons have this)
     pub download_total: Option<String>,
     /// Monthly downloads (only ESOUI addons have this)
@@ -594,13 +595,12 @@ impl From<AddonShowDetails> for InstalledAddonRow {
             } else {
                 Some(addon.author_name)
             },
-            version: addon.version,
-            installed_version: addon.installed_version,
             is_upgradable,
             category: addon.category,
             category_icon: addon.category_icon,
             source: InstalledAddonSource::Esoui { esoui_id: addon.id },
             esoui_match_id: None,
+            date: Some(addon.date),
             download_total: addon.download_total,
             download_monthly: addon.download_monthly,
             favorite_total: addon.favorite_total,
@@ -642,7 +642,7 @@ pub fn sort_installed_addons(
             addons.sort_by_key(|a| a.author.clone().unwrap_or_default().to_lowercase())
         }
         InstalledSort::Name => addons.sort_by_key(|a| a.name.to_lowercase()),
-        InstalledSort::Version => addons.sort_by_key(|a| a.version.clone()),
+        InstalledSort::Date => addons.sort_by(|a, b| a.date.as_deref().cmp(&b.date.as_deref())),
         InstalledSort::TotalDownloads => addons.sort_by_key(|a| count(&a.download_total)),
         InstalledSort::MonthlyDownloads => addons.sort_by_key(|a| count(&a.download_monthly)),
         InstalledSort::Favorites => addons.sort_by_key(|a| count(&a.favorite_total)),
@@ -699,7 +699,7 @@ impl<'a> InstalledAddonTable<'a> {
 
         egui::ScrollArea::horizontal().show(ui, |ui| {
             let author_width = header_width(ui, "Author").max(body_width(ui, "abcdefghijklmno"));
-            let version_width = header_width(ui, "Version").max(body_width(ui, "1.2.3.4"));
+            let date_width = header_width(ui, "Date").max(body_width(ui, "8888-88-88"));
             let downloads_width = header_width(ui, "Downloads").max(body_width(ui, "100,000"));
             let monthly_width = header_width(ui, "Monthly").max(body_width(ui, "10,000"));
             let likes_width = header_width(ui, "Likes").max(body_width(ui, "10,000"));
@@ -708,7 +708,7 @@ impl<'a> InstalledAddonTable<'a> {
             let fixed = INSTALLED_ACTION_COL_WIDTH
                 + INSTALLED_ICON_WIDTH
                 + author_width
-                + version_width
+                + date_width
                 + downloads_width
                 + monthly_width
                 + likes_width
@@ -726,7 +726,7 @@ impl<'a> InstalledAddonTable<'a> {
                 .column(Column::exact(INSTALLED_ICON_WIDTH))
                 .column(Column::exact(name_width).clip(true))
                 .column(Column::exact(author_width).clip(true))
-                .column(Column::exact(version_width))
+                .column(Column::exact(date_width))
                 .column(Column::exact(downloads_width))
                 .column(Column::exact(monthly_width))
                 .column(Column::exact(likes_width))
@@ -747,13 +747,7 @@ impl<'a> InstalledAddonTable<'a> {
                         )
                     });
                     header.col(|ui| {
-                        sortable_header_generic(
-                            ui,
-                            sort,
-                            ascending,
-                            "Version",
-                            InstalledSort::Version,
-                        )
+                        sortable_header_generic(ui, sort, ascending, "Date", InstalledSort::Date)
                     });
                     header.col(|ui| {
                         right_aligned(ui, |ui| {
@@ -895,11 +889,10 @@ impl<'a> InstalledAddonTable<'a> {
                             ui.label(truncate_len(&author.to_string(), 15));
                         });
 
-                        // Version column
+                        // Date column
                         row.col(|ui| {
-                            let version =
-                                addon.installed_version.as_deref().unwrap_or(&addon.version);
-                            ui.label(version);
+                            let date = addon.date.as_deref().unwrap_or("-");
+                            ui.label(date.split(' ').next().unwrap_or(date));
                         });
 
                         // Downloads column
