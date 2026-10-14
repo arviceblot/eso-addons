@@ -18,11 +18,11 @@ pub struct Search {
     search: String,
     is_init: bool,
     get_categories: PromisedValue<Vec<CategoryResult>>,
-    categories: HashMap<i32, CategoryResult>,
+    categories: HashMap<i64, CategoryResult>,
     category_addons: PromisedValue<Vec<AddonShowDetails>>,
     displayed_addons: Vec<AddonShowDetails>,
-    selected_category: i32,
-    previous_category: i32,
+    selected_category: i64,
+    previous_category: i64,
     sort: Sort,
     prev_sort: Sort,
     ascending: bool,
@@ -78,7 +78,7 @@ impl Search {
             .set(service.get_addons_by_category(self.selected_category));
     }
 
-    fn get_cagetory_title(&self, category_id: i32) -> String {
+    fn get_cagetory_title(&self, category_id: i64) -> String {
         self.categories.get(&category_id).unwrap().title.to_owned()
     }
 

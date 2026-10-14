@@ -1,5 +1,5 @@
 use snafu::{Backtrace, Snafu};
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, process::ExitStatus};
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
@@ -66,6 +66,9 @@ pub enum Error {
     #[snafu(display("Error with addon directory metadata {}: {}", dir.display(), source))]
     AddonDirMetadata { source: io::Error, dir: PathBuf },
 
+    #[snafu(display("Error reading addon directory {}: {}", dir.display(), source))]
+    AddonDirRead { source: io::Error, dir: PathBuf },
+
     #[snafu(display("Error with addon metadata file {}: {}", path.display(), source))]
     AddonMetadataFile { source: io::Error, path: PathBuf },
 
@@ -112,10 +115,31 @@ pub enum Error {
     HarvestMapDataNotInstalled,
 
     #[snafu(display("Addon {} not found", id))]
-    AddonNotFound { id: i32 },
+    AddonNotFound { id: i64 },
 
     #[snafu(display("Addon {} has no download URL", id))]
-    AddonMissingDownloadUrl { id: i32 },
+    AddonMissingDownloadUrl { id: i64 },
+
+    #[snafu(display("Unable to run git {} in {}: {}", command, path.display(), source))]
+    GitCommandStart {
+        source: io::Error,
+        command: String,
+        path: PathBuf,
+    },
+
+    #[snafu(display("git {} failed in {} ({}): {}", command, path.display(), status, stderr))]
+    GitCommandFailed {
+        command: String,
+        path: PathBuf,
+        status: ExitStatus,
+        stderr: String,
+    },
+
+    #[snafu(display("Staged changes in {}; repository was not updated", path.display()))]
+    GitStagedChanges { path: PathBuf },
+
+    #[snafu(display("Local commits in {} are not present in upstream; repository was not updated", path.display()))]
+    GitLocalCommits { path: PathBuf },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

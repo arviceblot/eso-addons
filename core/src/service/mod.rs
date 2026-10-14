@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use self::backup::{BackupData, BackupInstalledAddon, BackupManualDependency};
-use self::fs_util::{fs_delete_addon, fs_read_addon};
+use self::fs_util::{
+    fs_delete_addon, fs_has_addon_manifest, fs_read_addon, parse_full_manifest, parse_manifest_file,
+};
 use self::result::*;
 use crate::addons::{Addon, get_root_dir};
 use crate::api::ApiClient;
@@ -20,7 +22,12 @@ use entity::addon_image as AddonImage;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
 use entity::game_compatibility as GameCompat;
+use entity::git_addon as GitAddon;
+use entity::git_repo as GitRepo;
 use entity::installed_addon as InstalledAddon;
+use entity::installed_git_addon as InstalledGitAddon;
+use entity::installed_local_addon as InstalledLocalAddon;
+use entity::local_addon as LocalAddon;
 use entity::manual_dependency as ManualDependency;
 use migration::{Condition, Migrator, MigratorTrait};
 
@@ -43,6 +50,7 @@ use zip::ZipArchive;
 
 mod backup;
 mod fs_util;
+mod git;
 pub mod result;
 
 const TTC_NA_DOMAIN: &str = "us.tamrieltradecentre.com";
@@ -58,12 +66,19 @@ const SQLITE_MAX_VARS: usize = 32000;
 /// even if the schema adds columns later. SeaORM doesn't expose column counts at compile time.
 const INSERT_CHUNK: usize = SQLITE_MAX_VARS / 13;
 
+/// Maximum IDs per `DELETE … WHERE addon_id IN (?, ?, …)` chunk.
+/// Far smaller than `SQLITE_MAX_VARS` — large IN clauses cause expensive query plan
+/// compilation and memory pressure in SQLite. 500 IDs per batch keeps each DELETE
+/// fast while still batching effectively.
+const DELETE_CHUNK: usize = 500;
+
 #[derive(Debug, Clone, Default)]
 pub struct AddonService {
     pub api: ApiClient,
     pub config: config::Config,
     pub db: DatabaseConnection,
     pub errors: Arc<Mutex<Vec<ErrorRecord>>>,
+    pub git_available: bool,
 }
 impl AddonService {
     pub async fn new() -> Self {
@@ -102,6 +117,7 @@ impl AddonService {
             config,
             db,
             errors: Arc::new(Mutex::new(Vec::new())),
+            git_available: git::is_available(),
         }
     }
 
@@ -127,7 +143,7 @@ impl AddonService {
         }
     }
 
-    pub fn install(&self, addon_id: i32, update: bool) -> ImmediateValuePromise<()> {
+    pub fn install(&self, addon_id: i64, update: bool) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             if let Err(e) = service.p_install(addon_id, update).await {
@@ -141,13 +157,13 @@ impl AddonService {
 
     /// Best-effort human-readable label for an addon, e.g. "NinjaWicca UI (#4551)".
     /// Falls back to "addon {id}" when the name can't be looked up.
-    async fn addon_label(&self, addon_id: i32) -> String {
+    async fn addon_label(&self, addon_id: i64) -> String {
         match DbAddon::Entity::find_by_id(addon_id).one(&self.db).await {
             Ok(Some(a)) => format!("{} (#{addon_id})", a.name),
             _ => format!("addon {addon_id}"),
         }
     }
-    async fn p_install(&self, addon_id: i32, update: bool) -> Result<()> {
+    async fn p_install(&self, addon_id: i64, update: bool) -> Result<()> {
         self.p_update_addon_details(addon_id).await?;
         let entry = DbAddon::Entity::find_by_id(addon_id)
             .one(&self.db)
@@ -273,7 +289,7 @@ impl AddonService {
             let mut insert_imgs = vec![];
             let mut addon_ids = Vec::with_capacity(file_list.len());
             for list_item in file_list.into_iter() {
-                let addon_id: i32 = match list_item.id.parse() {
+                let addon_id: i64 = match list_item.id.parse() {
                     Ok(id) => id,
                     Err(e) => {
                         warn!("Skipping addon with non-integer id {:?}: {e}", list_item.id);
@@ -366,8 +382,8 @@ impl AddonService {
             }
 
             // delete + re-insert dirs/compat/images for the IDs we just touched.
-            // is_in still bind-counts the IDs, so chunk to stay under SQLITE_MAX_VARS.
-            for id_chunk in addon_ids.chunks(SQLITE_MAX_VARS) {
+            // Use a smaller chunk size for IN clauses to avoid expensive query plan compilation.
+            for id_chunk in addon_ids.chunks(DELETE_CHUNK) {
                 AddonDir::Entity::delete_many()
                     .filter(AddonDir::Column::AddonId.is_in(id_chunk.iter().copied()))
                     .exec(&txn)
@@ -414,7 +430,7 @@ impl AddonService {
         })
     }
 
-    async fn p_update_addon_details(&self, id: i32) -> Result<()> {
+    async fn p_update_addon_details(&self, id: i64) -> Result<()> {
         // check addon_detail not present or out of date
         let addon = DbAddon::Entity::find_by_id(id)
             .one(&self.db)
@@ -472,7 +488,7 @@ impl AddonService {
 
         Ok(())
     }
-    pub fn update_addon_details(&self, id: i32) -> ImmediateValuePromise<()> {
+    pub fn update_addon_details(&self, id: i64) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             if let Err(e) = service.p_update_addon_details(id).await {
@@ -548,7 +564,7 @@ impl AddonService {
         Ok(())
     }
 
-    pub fn remove(&self, addon_id: i32) -> ImmediateValuePromise<()> {
+    pub fn remove(&self, addon_id: i64) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Removing addon with id: {addon_id}");
@@ -645,313 +661,21 @@ impl AddonService {
         let db = self.db.clone();
         let addon_dir = self.get_addon_dir().clone();
         ImmediateValuePromise::new(async move {
-            // 1. Check for untracked installed addons
-            info!("Checking for untracked addons");
-            // grab every dir under Addons/
-            let walker = WalkDir::new(addon_dir.clone())
-                .min_depth(1)
-                .max_depth(1)
-                .into_iter();
-            let addon_dirs: Vec<String> = walker
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .filter_map(|e| {
-                    e.path()
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|s| s.to_string())
-                })
-                .collect();
-            let mut addon_versions: HashMap<_, _> = addon_dirs
-                .into_iter()
-                .map(|d| (d, String::from("0")))
-                .collect();
-
-            // now check every txt and addon file matching the directory name to get the installed version
-            let parser = eso_addon_manifest::AddonManifestParser::default();
-            let walker = WalkDir::new(&addon_dir)
-                .min_depth(2)
-                .max_depth(4)
-                .into_iter();
-            let mut manifest_deps: HashMap<String, Vec<String>> = HashMap::new();
-            let mut nested_dirs: HashMap<String, Vec<String>> = HashMap::new();
-            for entry in walker.filter_map(|e| e.ok()).filter(|e| {
-                let path = e.path();
-                let Some(parent_name) = path.parent().and_then(|p| p.file_name()) else {
-                    return false;
-                };
-                let Some(stem) = path.file_stem() else {
-                    return false;
-                };
-                let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-                    return false;
-                };
-                path.is_file() && parent_name == stem && ["txt", "addon"].contains(&ext)
-            }) {
-                let parent = entry
-                    .path()
-                    .parent()
-                    .expect("walker min_depth(2) guarantees a parent");
-                let Some(dir_name) = parent
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(String::from)
-                else {
-                    continue;
-                };
-                let stripped = entry
-                    .path()
-                    .strip_prefix(&addon_dir)
-                    .expect("walker rooted at addon_dir");
-                let Some(top_level) = stripped
-                    .components()
-                    .next()
-                    .and_then(|c| c.as_os_str().to_str())
-                    .map(String::from)
-                else {
-                    continue;
-                };
-                let Some(path_str) = entry.path().to_str() else {
-                    warn!("Skipping non-UTF-8 manifest path {:?}", entry.path());
-                    continue;
-                };
-                let manifest = match parser.parse(path_str, None) {
-                    Ok(manifest) => manifest,
-                    Err(err) => {
-                        warn!("{}", err);
-                        continue;
-                    }
-                };
-                if dir_name != top_level {
-                    // nested sub-addon, e.g. CombatMetrics/CombatMetricsFightData/
-                    nested_dirs.entry(top_level).or_default().push(dir_name);
-                    continue;
-                }
-                let new_version = manifest.version.unwrap_or_else(|| "0".to_string());
-                if let Some(version) = addon_versions.get(&dir_name) {
-                    let should_update = if version == "0" {
-                        !new_version.trim().is_empty() && new_version != "0"
-                    } else {
-                        match (Version::from(version), Version::from(&new_version)) {
-                            (Some(current), Some(candidate)) => current < candidate,
-                            (None, Some(_)) => true,
-                            _ => false,
-                        }
-                    };
-                    if should_update {
-                        addon_versions.insert(dir_name.clone(), new_version);
-                    }
-                }
-                if !manifest.depends_on.is_empty() {
-                    manifest_deps.insert(
-                        dir_name,
-                        manifest.depends_on.into_iter().map(|d| d.title).collect(),
-                    );
-                }
-            }
-
-            // check database for any untracked addons (not installed, AddonDir matches, and AddonDir not installed by another)
-            let keys: Vec<String> = addon_versions.keys().cloned().collect();
-            let placeholders = vec!["?"; keys.len()].join(", ");
-            let sql = format!(
-                r#"SELECT
-	a.id,
-	a.name,
-	d.dir,
-	a.download_monthly
-from addon a
-inner join addon_dir d on a.id = d.addon_id
-inner join (
-SELECT
-	d.dir,
-	max(cast(a.download_monthly as int)) download_monthly
-from addon_dir d
-inner join addon a on d.addon_id = a.id
-where d.dir in ({})
-GROUP by d.dir) m on d.dir = m.dir and a.download_monthly = m.download_monthly
-left outer join installed_addon i on a.id = i.addon_id
-where i.addon_id is null
-    and d.dir not in (
-        select d.dir
-        from addon_dir d
-        inner join installed_addon i on d.addon_id = i.addon_id
-    )"#,
-                placeholders
-            );
-
-            let db_results = db
-                .query_all_raw(Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    &sql,
-                    keys.iter().map(|k| k.into()).collect::<Vec<_>>(),
-                ))
+            fetch_installed_esoui_addons(&db, &addon_dir)
                 .await
-                .context(error::DbGetSnafu)?;
-            let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
-            let mut detected_versions: HashMap<i32, String> =
-                HashMap::with_capacity(db_results.len());
-
-            for x in db_results.iter() {
-                let addon_id: i32 = x.try_get_by(0).context(error::DbGetSnafu)?;
-                let dir: String = x.try_get_by(2).context(error::DbGetSnafu)?;
-
-                let candidate_version = addon_versions
-                    .get(&dir)
-                    .cloned()
-                    .unwrap_or_else(|| "0".to_string());
-
-                let selected_version = detected_versions
-                    .entry(addon_id)
-                    .or_insert_with(|| "0".to_string());
-
-                if candidate_version.trim().is_empty() || candidate_version == "0" {
-                    continue;
-                }
-
-                let should_update = if selected_version == "0" {
-                    true
-                } else {
-                    match (
-                        Version::from(&*selected_version),
-                        Version::from(&candidate_version),
-                    ) {
-                        (Some(current), Some(candidate)) => current < candidate,
-                        (None, Some(_)) => true,
-                        _ => false,
-                    }
-                };
-
-                if should_update {
-                    *selected_version = candidate_version;
-                }
-            }
-
-            let inserts: Vec<InstalledAddon::ActiveModel> = detected_versions
-                .into_iter()
-                .map(|(addon_id, version)| InstalledAddon::ActiveModel {
-                    addon_id: ActiveValue::Set(addon_id),
-                    version: ActiveValue::Set(version),
-                    date: ActiveValue::Set(now.to_string()),
-                })
-                .collect();
-
-            // 2. insert as installed, update checks will handle the rest
-            if !inserts.is_empty() {
-                info!("Adding {} untracked addons", inserts.len());
-                InstalledAddon::Entity::insert_many(inserts)
-                    .exec(&db)
-                    .await?;
-            }
-
-            // Register nested sub-addon dirs under the parent's addon_id. ESOUI's
-            // file list only enumerates the top-level dir, so deps targeting bundled
-            // sub-addons (e.g. CombatMetrics depending on CombatMetricsFightData)
-            // would otherwise resolve as missing.
-            if !nested_dirs.is_empty() {
-                let parent_dirs: Vec<String> = nested_dirs.keys().cloned().collect();
-                let parent_to_addon = resolve_dirs_to_addons(&db, &parent_dirs).await?;
-
-                let mut dir_inserts: Vec<AddonDir::ActiveModel> =
-                    Vec::with_capacity(nested_dirs.values().map(|v| v.len()).sum());
-                for (parent, subs) in nested_dirs {
-                    let Some(&addon_id) = parent_to_addon.get(&parent) else {
-                        continue;
-                    };
-                    for sub in subs {
-                        dir_inserts.push(AddonDir::ActiveModel {
-                            addon_id: ActiveValue::Set(addon_id),
-                            dir: ActiveValue::Set(sub),
-                        });
-                    }
-                }
-                if !dir_inserts.is_empty() {
-                    let result = AddonDir::Entity::insert_many(dir_inserts)
-                        .on_conflict(
-                            OnConflict::columns([AddonDir::Column::AddonId, AddonDir::Column::Dir])
-                                .do_nothing()
-                                .to_owned(),
-                        )
-                        .exec(&db)
-                        .await;
-                    check_db_result(result)?;
-                }
-            }
-
-            // p_install populates addon_dependency only on the download path, so
-            // addons installed via Minion or by hand had no dep rows. Refresh from
-            // manifests for everything we could parse.
-            if !manifest_deps.is_empty() {
-                let manifest_dirs: Vec<String> = manifest_deps.keys().cloned().collect();
-                let addon_for_dir = resolve_dirs_to_addons(&db, &manifest_dirs).await?;
-
-                let affected: Vec<i32> = addon_for_dir.values().copied().collect();
-                if !affected.is_empty() {
-                    AddonDep::Entity::delete_many()
-                        .filter(AddonDep::Column::AddonId.is_in(affected))
-                        .exec(&db)
-                        .await
-                        .context(error::DbDeleteSnafu)?;
-                }
-
-                let mut dep_inserts: Vec<AddonDep::ActiveModel> =
-                    Vec::with_capacity(manifest_deps.values().map(|v| v.len()).sum());
-                for (dir, deps) in manifest_deps {
-                    let Some(&addon_id) = addon_for_dir.get(&dir) else {
-                        continue;
-                    };
-                    for dep_title in deps {
-                        dep_inserts.push(AddonDep::ActiveModel {
-                            addon_id: ActiveValue::Set(addon_id),
-                            dependency_dir: ActiveValue::Set(dep_title),
-                        });
-                    }
-                }
-                if !dep_inserts.is_empty() {
-                    let result = AddonDep::Entity::insert_many(dep_inserts)
-                        .on_conflict(
-                            OnConflict::columns([
-                                AddonDep::Column::AddonId,
-                                AddonDep::Column::DependencyDir,
-                            ])
-                            .do_nothing()
-                            .to_owned(),
-                        )
-                        .exec(&db)
-                        .await;
-                    check_db_result(result)?;
-                }
-            }
-
-            info!("Getting installed addons");
-            // 3. Get the full installed set along with installed version
-            let results = DbAddon::Entity::find()
-                .column_as(DbAddon::Column::Version, "version")
-                .column_as(InstalledAddon::Column::Version, "installed_version")
-                .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
-                .column_as(Category::Column::Title, "category")
-                .column_as(Expr::value("NULL"), "description")
-                .column_as(Expr::value("NULL"), "change_log")
-                .column_as(Expr::value("NULL"), "game_compat_version")
-                .column_as(Expr::value("NULL"), "game_compat_name")
-                .column_as(Category::Column::Icon, "category_icon")
-                .inner_join(Category::Entity)
-                .inner_join(InstalledAddon::Entity)
-                .into_model::<AddonShowDetails>()
-                .all(&db)
-                .await
-                .context(error::DbGetSnafu)?;
-            info!("Done getting addons!");
-            Ok(results)
+                .map_err(Into::into)
         })
     }
 
     pub fn get_missing_dependency_options(&self) -> ImmediateValuePromise<Vec<AddonDepOption>> {
         let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
 
         ImmediateValuePromise::new(async move {
             info!("Checking for missing dependencies");
 
-            let results = AddonDepOption::find_by_statement(Statement::from_sql_and_values(
+            // 1. ESOUI dependencies (existing SQL query)
+            let mut results = AddonDepOption::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 r#"select
             dependency_dir missing_dir,
@@ -996,13 +720,51 @@ where i.addon_id is null
             .all(&db)
             .await
             .context(error::DbGetSnafu)?;
+
+            // 2. Non-ESOUI addon dependencies (git + local)
+            //    Parse manifests and check against ALL installed directories.
+            let all_dirs: HashSet<String> = get_all_installed_dirs(&addon_dir);
+            let mut seen: HashSet<String> = results.iter().map(|r| r.missing_dir.clone()).collect();
+
+            // Check git addon dependencies
+            let git_addons = GitAddon::Entity::find()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            check_non_esoui_deps(
+                &db,
+                &addon_dir,
+                &git_addons,
+                |ga| (&ga.directory, &ga.directory),
+                &all_dirs,
+                &mut seen,
+                &mut results,
+            )
+            .await;
+
+            // Check local addon dependencies
+            let local_addons = LocalAddon::Entity::find()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            check_non_esoui_deps(
+                &db,
+                &addon_dir,
+                &local_addons,
+                |la| (&la.directory, &la.title),
+                &all_dirs,
+                &mut seen,
+                &mut results,
+            )
+            .await;
+
             Ok(results)
         })
     }
 
     pub fn get_addon_dependency_view(
         &self,
-        addon_id: i32,
+        addon_id: i64,
     ) -> ImmediateValuePromise<AddonDependencyView> {
         let db = self.db.clone();
 
@@ -1010,13 +772,13 @@ where i.addon_id is null
             #[derive(FromQueryResult)]
             struct DirOwner {
                 dir: String,
-                id: i32,
+                id: i64,
                 name: String,
             }
             #[derive(FromQueryResult)]
             struct SuggestionRow {
                 dir: String,
-                id: i32,
+                id: i64,
                 name: String,
             }
 
@@ -1067,7 +829,7 @@ where i.addon_id is null
                 .all(&db)
                 .await
                 .context(error::DbGetSnafu)?;
-            let satisfied_ids: Vec<i32> =
+            let satisfied_ids: Vec<i64> =
                 manual_rows.iter().filter_map(|m| m.satisfied_by).collect();
             let satisfied_addons = if satisfied_ids.is_empty() {
                 vec![]
@@ -1078,7 +840,7 @@ where i.addon_id is null
                     .await
                     .context(error::DbGetSnafu)?
             };
-            let satisfied_name_map: HashMap<i32, String> = satisfied_addons
+            let satisfied_name_map: HashMap<i64, String> = satisfied_addons
                 .into_iter()
                 .map(|a| (a.id, a.name))
                 .collect();
@@ -1213,7 +975,7 @@ where i.addon_id is null
     pub fn set_dep_satisfied_by(
         &self,
         dep_dir: String,
-        addon_id: i32,
+        addon_id: i64,
     ) -> ImmediateValuePromise<()> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
@@ -1248,7 +1010,7 @@ where i.addon_id is null
         })
     }
 
-    pub fn install_dep_suggestions(&self, items: Vec<(String, i32)>) -> ImmediateValuePromise<()> {
+    pub fn install_dep_suggestions(&self, items: Vec<(String, i64)>) -> ImmediateValuePromise<()> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             for (dep_dir, addon_id) in items {
@@ -1276,7 +1038,7 @@ where i.addon_id is null
 
     pub fn get_addon_details(
         &self,
-        addon_id: i32,
+        addon_id: i64,
     ) -> ImmediateValuePromise<Option<AddonShowDetails>> {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
@@ -1406,7 +1168,7 @@ where i.addon_id is null
                 None => continue,
             };
 
-            if (file.name()).ends_with('/') {
+            if file.is_dir() {
                 fs::create_dir_all(&outpath)
                     .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             } else {
@@ -1475,14 +1237,32 @@ where i.addon_id is null
                 }
 
                 let url = format!("https://{domain}/download/PriceTable");
-                service
+                match service
                     .base_fs_download_extract(&url, Some("TamrielTradeCentre"), None)
-                    .await?;
-                downloaded = true;
-                if domain == TTC_NA_DOMAIN {
-                    update.na_version = server_version;
-                } else {
-                    update.eu_version = server_version;
+                    .await
+                {
+                    Ok(_) => {
+                        downloaded = true;
+                        if domain == TTC_NA_DOMAIN {
+                            update.na_version = server_version;
+                        } else {
+                            update.eu_version = server_version;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("TTC PriceTable {domain} download/extract failed: {e}");
+                        service.record_error(
+                            format!("Updating TTC PriceTable ({domain})"),
+                            e.to_string(),
+                        );
+                        // Still advance the version tracking so a stale local copy
+                        // doesn't cause a permanent retry loop on every launch.
+                        if domain == TTC_NA_DOMAIN {
+                            update.na_version = server_version;
+                        } else {
+                            update.eu_version = server_version;
+                        }
+                    }
                 }
             }
 
@@ -1501,12 +1281,12 @@ where i.addon_id is null
 
         ImmediateValuePromise::new(async move {
             let line = fs::read_to_string(&filepath)?;
-            let ids: Vec<i32> = line
+            let ids: Vec<i64> = line
                 .split(',')
                 .filter(|x| !x.is_empty())
                 .filter_map(|raw| {
                     raw.trim()
-                        .parse::<i32>()
+                        .parse::<i64>()
                         .map_err(|e| {
                             service.record_error(
                                 format!("Importing Minion backup {}", filepath.display()),
@@ -1577,7 +1357,7 @@ where i.addon_id is null
 
     pub fn get_addons_by_category(
         &self,
-        category_id: i32,
+        category_id: i64,
     ) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
@@ -1661,7 +1441,7 @@ where i.addon_id is null
         ImmediateValuePromise::new(async move {
             info!("Updating HarvestMap data...");
             // ensure HarvestMap-Data installed (id: 3034)
-            const HMD_ID: i32 = 3034;
+            const HMD_ID: i64 = 3034;
 
             let hmd_addon = InstalledAddon::Entity::find_by_id(HMD_ID)
                 .one(&db)
@@ -1747,6 +1527,781 @@ where i.addon_id is null
             Ok(update)
         })
     }
+
+    pub fn pull_git_repositories(&self) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            info!("Pulling Git repositories");
+            tokio::task::spawn_blocking(move || service.p_pull_git_repositories()).await?;
+            Ok(())
+        })
+    }
+
+    fn p_find_git_repositories(&self, addon_dir: &Path) -> Vec<PathBuf> {
+        let mut repositories = Vec::new();
+        let mut walker = WalkDir::new(addon_dir).into_iter();
+        while let Some(entry) = walker.next() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.record_error(
+                        format!(
+                            "Scanning Git repositories at {}",
+                            error.path().unwrap_or(addon_dir).display()
+                        ),
+                        error,
+                    );
+                    continue;
+                }
+            };
+            let path = entry.path();
+
+            if (entry.depth() == 0 || entry.file_type().is_dir()) && path.join(".jj").exists() {
+                info!("Skipping Jujutsu workspace {}", path.display());
+                walker.skip_current_dir();
+                continue;
+            }
+
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            if path.join(".git").exists() {
+                repositories.push(path.to_owned());
+                walker.skip_current_dir();
+                continue;
+            }
+
+            match fs_has_addon_manifest(path) {
+                Ok(true) => walker.skip_current_dir(),
+                Ok(false) => {}
+                Err(error) => {
+                    self.record_error(
+                        format!("Scanning Git repositories at {}", path.display()),
+                        error,
+                    );
+                    walker.skip_current_dir();
+                }
+            }
+        }
+
+        repositories
+    }
+
+    fn p_pull_git_repositories(&self) {
+        let repositories = self.p_find_git_repositories(&self.get_addon_dir());
+        for path in repositories {
+            if let Err(error) = git::pull_repository(&path) {
+                self.record_error(format!("Pulling Git repository {}", path.display()), error);
+            }
+        }
+        info!("Done pulling Git repositories!");
+    }
+
+    // region: Multi-source addon scanning
+
+    /// Scan the AddOns directory for locally installed (non-ESOUI, non-git) addons.
+    /// Upserts findings into the `local_addon` and `installed_local_addon` tables.
+    pub fn scan_local_addons(&self) -> ImmediateValuePromise<Vec<LocalAddonResult>> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        let git_repos = self.p_find_git_repositories(&addon_dir);
+        ImmediateValuePromise::new(async move {
+            info!("Scanning for local addons");
+
+            // Get directories already tracked as local addons
+            let existing: Vec<LocalAddon::Model> = LocalAddon::Entity::find()
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let existing_map: HashMap<String, i64> = existing
+                .iter()
+                .map(|a| (a.directory.clone(), a.id))
+                .collect();
+
+            // Build a lookup of directory -> ESOUI addon_id from addon_dir table
+            #[derive(FromQueryResult)]
+            struct AddonDirRow {
+                dir: String,
+                addon_id: i64,
+            }
+            let addon_dir_rows: Vec<AddonDirRow> =
+                AddonDirRow::find_by_statement(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT dir, addon_id FROM addon_dir",
+                    [],
+                ))
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let esoui_match: HashMap<String, i64> = addon_dir_rows
+                .iter()
+                .map(|r| (r.dir.clone(), r.addon_id))
+                .collect();
+
+            // Build a set of directories that are currently managed by ESOUI (installed).
+            // These should NOT appear as local addons even if their directory exists on disk.
+            #[derive(FromQueryResult)]
+            struct InstalledAddonDir {
+                dir: String,
+            }
+            let installed_dirs: Vec<InstalledAddonDir> =
+                InstalledAddonDir::find_by_statement(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT d.dir FROM addon_dir d \
+                     INNER JOIN installed_addon i ON d.addon_id = i.addon_id \
+                     WHERE d.dir != ''",
+                    [],
+                ))
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            let installed_dir_names: HashSet<String> =
+                installed_dirs.iter().map(|r| r.dir.clone()).collect();
+
+            // Get directories tracked by git repos
+            let git_dirs: HashSet<String> = git_repos
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+                .collect();
+
+            // Walk AddOns/ top-level directories
+            let walker = WalkDir::new(&addon_dir)
+                .min_depth(1)
+                .max_depth(1)
+                .into_iter();
+
+            let mut results = Vec::new();
+
+            for entry in walker.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+                let dir_path = entry.path();
+                let Some(dir_name) = dir_path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let dir_name = dir_name.to_string();
+
+                // Skip git repos
+                if git_dirs.contains(&dir_name) {
+                    continue;
+                }
+
+                // Skip directories managed by ESOUI (installed addons)
+                if installed_dir_names.contains(&dir_name) {
+                    continue;
+                }
+
+                // Parse manifest (free function, just file I/O)
+                let manifest = parse_full_manifest(dir_path, &dir_name);
+                let title = manifest.as_ref().map_or_else(
+                    || dir_name.to_string(),
+                    |m| {
+                        if m.title.is_empty() {
+                            dir_name.to_string()
+                        } else {
+                            m.title.clone()
+                        }
+                    },
+                );
+                let author = manifest.as_ref().and_then(|m| {
+                    if m.author.is_empty() {
+                        None
+                    } else {
+                        Some(m.author.clone())
+                    }
+                });
+                let version = manifest.as_ref().and_then(|m| m.version.clone());
+                let add_on_version = manifest
+                    .as_ref()
+                    .and_then(|m| m.addon_version.map(|v| v as i64));
+                let api_version = manifest.as_ref().map(|m| m.api_version);
+                let depends_on = manifest.as_ref().map_or_else(Vec::new, |m| {
+                    m.depends_on.iter().map(|d| d.title.clone()).collect()
+                });
+                let optional_depends_on = manifest.as_ref().map_or_else(Vec::new, |m| {
+                    m.optional_depends_on
+                        .iter()
+                        .map(|d| d.title.clone())
+                        .collect()
+                });
+                let description = manifest.as_ref().and_then(|m| m.description.clone());
+                let category = manifest.as_ref().and_then(|m| match m.is_library {
+                    Some(true) => Some("Libraries".to_string()),
+                    Some(false) | None => None,
+                });
+
+                // Upsert into local_addon table
+                let new_id = if let Some(id) = existing_map.get(&dir_name) {
+                    *id
+                } else {
+                    let active = LocalAddon::ActiveModel {
+                        id: ActiveValue::NotSet,
+                        directory: ActiveValue::Set(dir_name.clone()),
+                        title: ActiveValue::Set(title.clone()),
+                        author: ActiveValue::Set(author.clone()),
+                        version: ActiveValue::Set(version.clone()),
+                        add_on_version: ActiveValue::Set(add_on_version),
+                        description: ActiveValue::Set(description.clone()),
+                    };
+                    active.insert(&db).await.context(error::DbPutSnafu)?.id
+                };
+
+                // Insert/update installed_local_addon via upsert
+                let _ = InstalledLocalAddon::Entity::insert(InstalledLocalAddon::ActiveModel {
+                    local_addon_id: ActiveValue::Set(new_id),
+                    installed_version: ActiveValue::Set(version.clone()),
+                    installed_add_on_version: ActiveValue::Set(add_on_version),
+                })
+                .on_conflict(
+                    OnConflict::column(InstalledLocalAddon::Column::LocalAddonId)
+                        .update_columns([
+                            InstalledLocalAddon::Column::InstalledVersion,
+                            InstalledLocalAddon::Column::InstalledAddOnVersion,
+                        ])
+                        .to_owned(),
+                )
+                .exec(&db)
+                .await;
+
+                results.push(LocalAddonResult {
+                    id: new_id,
+                    directory: dir_name.clone(),
+                    title,
+                    author,
+                    version,
+                    add_on_version,
+                    api_version,
+                    depends_on,
+                    optional_depends_on,
+                    description,
+                    category,
+                    esoui_match_id: esoui_match.get(&dir_name).copied(),
+                });
+            }
+
+            info!("Done scanning local addons: {} found", results.len());
+            Ok(results)
+        })
+    }
+
+    /// Scan git repositories in the AddOns directory and upsert metadata.
+    pub fn scan_git_addons(&self) -> ImmediateValuePromise<Vec<GitAddonResult>> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        ImmediateValuePromise::new(async move {
+            info!("Scanning Git addon repositories");
+
+            let repositories = {
+                let db_clone = db.clone();
+                let addon_dir_clone = addon_dir.clone();
+                tokio::task::spawn_blocking(move || {
+                    let service = AddonService {
+                        db: db_clone,
+                        ..Default::default()
+                    };
+                    service.p_find_git_repositories(&addon_dir_clone)
+                })
+                .await
+                .unwrap_or_default()
+            };
+
+            let mut results = Vec::new();
+
+            for repo_path in &repositories {
+                // Determine the remote URL
+                let url = git::get_remote_url(repo_path).unwrap_or_else(|_| {
+                    repo_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+
+                // Upsert git_repo
+                let existing_repo = GitRepo::Entity::find()
+                    .filter(GitRepo::Column::Url.eq(url.clone()))
+                    .one(&db)
+                    .await
+                    .context(error::DbGetSnafu)?;
+
+                let repo_id = if let Some(repo) = existing_repo {
+                    repo.id
+                } else {
+                    let path_str = repo_path
+                        .strip_prefix(&addon_dir)
+                        .unwrap_or(repo_path)
+                        .to_string_lossy()
+                        .to_string();
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let active = GitRepo::ActiveModel {
+                        id: ActiveValue::NotSet,
+                        url: ActiveValue::Set(url.clone()),
+                        branch: ActiveValue::Set(String::from("main")),
+                        path: ActiveValue::Set(path_str),
+                        last_updated: ActiveValue::Set(Some(now.clone())),
+                        created_at: ActiveValue::Set(now),
+                    };
+                    active.insert(&db).await.context(error::DbPutSnafu)?.id
+                };
+
+                // Determine addon directories within the repo
+                let addon_paths: Vec<PathBuf> = if fs_has_addon_manifest(repo_path).unwrap_or(false)
+                {
+                    vec![repo_path.clone()]
+                } else {
+                    let mut subdirs = Vec::new();
+                    if let Ok(entries) = fs::read_dir(repo_path) {
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            let p = entry.path();
+                            if p.is_dir() && fs_has_addon_manifest(&p).unwrap_or(false) {
+                                subdirs.push(p);
+                            }
+                        }
+                    }
+                    if subdirs.is_empty() {
+                        vec![repo_path.clone()]
+                    } else {
+                        subdirs
+                    }
+                };
+
+                for addon_path in addon_paths {
+                    let dir_name = addon_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    // Parse manifest
+                    let manifest = parse_full_manifest(&addon_path, &dir_name);
+                    let title = manifest.as_ref().map_or_else(
+                        || dir_name.to_string(),
+                        |m| {
+                            if m.title.is_empty() {
+                                dir_name.to_string()
+                            } else {
+                                m.title.clone()
+                            }
+                        },
+                    );
+                    let author = manifest.as_ref().and_then(|m| {
+                        if m.author.is_empty() {
+                            None
+                        } else {
+                            Some(m.author.clone())
+                        }
+                    });
+                    let version = manifest.as_ref().and_then(|m| m.version.clone());
+                    let add_on_version = manifest
+                        .as_ref()
+                        .and_then(|m| m.addon_version.map(|v| v as i64));
+                    let api_version = manifest.as_ref().map(|m| m.api_version);
+                    let depends_on = manifest.as_ref().map_or_else(Vec::new, |m| {
+                        m.depends_on.iter().map(|d| d.title.clone()).collect()
+                    });
+                    let optional_depends_on = manifest.as_ref().map_or_else(Vec::new, |m| {
+                        m.optional_depends_on
+                            .iter()
+                            .map(|d| d.title.clone())
+                            .collect()
+                    });
+                    let description = manifest.as_ref().and_then(|m| m.description.clone());
+                    let category = manifest.as_ref().and_then(|m| match m.is_library {
+                        Some(true) => Some("Libraries".to_string()),
+                        Some(false) | None => None,
+                    });
+
+                    // Upsert git_addon
+                    let existing_addon = GitAddon::Entity::find()
+                        .filter(GitAddon::Column::GitRepoId.eq(repo_id))
+                        .filter(GitAddon::Column::Directory.eq(dir_name.clone()))
+                        .one(&db)
+                        .await
+                        .context(error::DbGetSnafu)?;
+
+                    let addon_id = if let Some(addon) = existing_addon {
+                        addon.id
+                    } else {
+                        let active = GitAddon::ActiveModel {
+                            id: ActiveValue::NotSet,
+                            git_repo_id: ActiveValue::Set(repo_id),
+                            directory: ActiveValue::Set(dir_name.clone()),
+                            title: ActiveValue::Set(title.clone()),
+                            author: ActiveValue::Set(author.clone()),
+                            version: ActiveValue::Set(version.clone()),
+                            add_on_version: ActiveValue::Set(add_on_version),
+                            description: ActiveValue::Set(description.clone()),
+                            remote_version: ActiveValue::Set(version.clone()),
+                            remote_add_on_version: ActiveValue::Set(add_on_version),
+                        };
+                        active.insert(&db).await.context(error::DbPutSnafu)?.id
+                    };
+
+                    // Insert/update installed_git_addon via upsert
+                    let _ = InstalledGitAddon::Entity::insert(InstalledGitAddon::ActiveModel {
+                        git_addon_id: ActiveValue::Set(addon_id),
+                        installed_version: ActiveValue::Set(version.clone()),
+                        installed_add_on_version: ActiveValue::Set(add_on_version),
+                    })
+                    .on_conflict(
+                        OnConflict::column(InstalledGitAddon::Column::GitAddonId)
+                            .update_columns([
+                                InstalledGitAddon::Column::InstalledVersion,
+                                InstalledGitAddon::Column::InstalledAddOnVersion,
+                            ])
+                            .to_owned(),
+                    )
+                    .exec(&db)
+                    .await;
+
+                    results.push(GitAddonResult {
+                        id: addon_id,
+                        repo_id,
+                        repo_url: url.clone(),
+                        directory: dir_name,
+                        title,
+                        author,
+                        remote_version: version.clone(),
+                        remote_add_on_version: add_on_version,
+                        version,
+                        add_on_version,
+                        api_version,
+                        depends_on,
+                        optional_depends_on,
+                        description,
+                        is_upgradable: false,
+                        category,
+                    });
+                }
+            }
+
+            info!(
+                "Done scanning Git addons: {} found across {} repos",
+                results.len(),
+                repositories.len()
+            );
+            Ok(results)
+        })
+    }
+
+    /// Get all installed addons from all sources (ESOUI, Git, Local).
+    pub fn get_all_installed_addons(&self) -> ImmediateValuePromise<Vec<InstalledAddonDetails>> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        ImmediateValuePromise::new(async move {
+            let mut all = Vec::new();
+
+            // 1. ESOUI addons (reuse the existing logic)
+            let esoui_addons = fetch_installed_esoui_addons(&db, &addon_dir).await?;
+            for addon in esoui_addons {
+                all.push(InstalledAddonDetails::from_esoui(addon));
+            }
+
+            // 2. Local addons
+            let local_addons = fetch_local_addons(&db).await?;
+            for addon in local_addons {
+                let version = addon.version.clone().unwrap_or_default();
+                let installed = addon.installed_version.clone();
+                let is_upgradable = version != installed.as_deref().unwrap_or_default();
+                let category = if addon.title.starts_with("Lib") {
+                    "Libraries".to_string()
+                } else {
+                    "Addons".to_string()
+                };
+                all.push(InstalledAddonDetails {
+                    source: AddonSource::Local,
+                    id: addon.id,
+                    name: addon.title,
+                    author: addon.author,
+                    version,
+                    installed_version: installed,
+                    is_upgradable,
+                    category,
+                    description: addon.description,
+                    ..Default::default()
+                });
+            }
+
+            // 3. Git addons
+            let git_addons = fetch_git_addons(&db).await?;
+            for addon in git_addons {
+                let version = addon.version.clone().unwrap_or_default();
+                let installed = addon.installed_version.clone();
+                let is_upg = version != installed.as_deref().unwrap_or_default();
+                let category = if addon.title.starts_with("Lib") {
+                    "Libraries".to_string()
+                } else {
+                    "Addons".to_string()
+                };
+                all.push(InstalledAddonDetails {
+                    source: AddonSource::Git {
+                        repo_id: addon.repo_id,
+                        repo_url: addon.repo_url,
+                    },
+                    id: addon.id,
+                    name: addon.title,
+                    author: addon.author,
+                    version,
+                    installed_version: installed,
+                    is_upgradable: is_upg,
+                    category,
+                    description: addon.description,
+                    ..Default::default()
+                });
+            }
+
+            Ok(all)
+        })
+    }
+
+    /// Get all installed addon directory names across all sources (ESOUI, Git, Local).
+    /// Used for resolving manifest-based dependencies.
+    pub fn get_installed_addon_directories(&self) -> ImmediateValuePromise<HashSet<String>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            use sea_orm::Statement;
+
+            #[derive(FromQueryResult)]
+            struct DirRow {
+                directory: String,
+            }
+
+            // ESOUI: from addon_dir joined with installed_addon
+            let esoui_dirs = DirRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"SELECT d.dir as directory
+                   FROM addon_dir d
+                   INNER JOIN installed_addon i ON i.addon_id = d.addon_id"#,
+                [],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+
+            // Local: from local_addon joined with installed_local_addon
+            let local_dirs = DirRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"SELECT la.directory as directory
+                   FROM local_addon la
+                   INNER JOIN installed_local_addon il ON il.local_addon_id = la.id"#,
+                [],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+
+            // Git: from git_addon joined with installed_git_addon
+            let git_dirs = DirRow::find_by_statement(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                r#"SELECT ga.directory as directory
+                   FROM git_addon ga
+                   INNER JOIN installed_git_addon ig ON ig.git_addon_id = ga.id"#,
+                [],
+            ))
+            .all(&db)
+            .await
+            .context(error::DbGetSnafu)?;
+
+            let mut dirs = HashSet::new();
+            for row in esoui_dirs {
+                dirs.insert(row.directory);
+            }
+            for row in local_dirs {
+                dirs.insert(row.directory);
+            }
+            for row in git_dirs {
+                dirs.insert(row.directory);
+            }
+            Ok(dirs)
+        })
+    }
+
+    /// Get local (manually installed) addons with installation state.
+    pub fn get_local_addons(&self) -> ImmediateValuePromise<Vec<LocalInstalledAddon>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move { Ok(fetch_local_addons(&db).await?) })
+    }
+
+    /// Get git-tracked addons with installation state and repo info.
+    pub fn get_git_addons(&self) -> ImmediateValuePromise<Vec<GitInstalledAddon>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move { Ok(fetch_git_addons(&db).await?) })
+    }
+
+    /// Uninstall a locally installed addon by removing its directory and DB records.
+    pub fn uninstall_local_addon(&self, local_addon_id: i64) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        ImmediateValuePromise::new(async move {
+            // Get the addon directory name
+            let addon = LocalAddon::Entity::find_by_id(local_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: local_addon_id })?;
+
+            // Delete from filesystem
+            let full_path = addon_dir.join(&addon.directory);
+            if full_path.exists() {
+                fs::remove_dir_all(&full_path).context(error::AddonDeleteSnafu {
+                    dir: full_path.clone(),
+                })?;
+            }
+
+            // DB records are cascade-deleted when we delete the local_addon row
+            LocalAddon::Entity::find_by_id(local_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: local_addon_id })?
+                .into_active_model()
+                .delete(&db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+
+            info!(
+                "Uninstalled local addon '{}' ({})",
+                addon.title, addon.directory
+            );
+            Ok(())
+        })
+    }
+
+    /// Uninstall a git-tracked addon by removing its directory and DB records.
+    pub fn uninstall_git_addon(&self, git_addon_id: i64) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        ImmediateValuePromise::new(async move {
+            // Get the addon directory name
+            let addon = GitAddon::Entity::find_by_id(git_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: git_addon_id })?;
+
+            // Delete from filesystem
+            let full_path = addon_dir.join(&addon.directory);
+            if full_path.exists() {
+                fs::remove_dir_all(&full_path).context(error::AddonDeleteSnafu {
+                    dir: full_path.clone(),
+                })?;
+            }
+
+            // DB records are cascade-deleted when we delete the git_addon row
+            GitAddon::Entity::find_by_id(git_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: git_addon_id })?
+                .into_active_model()
+                .delete(&db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+
+            info!(
+                "Uninstalled git addon '{}' ({})",
+                addon.title, addon.directory
+            );
+            Ok(())
+        })
+    }
+
+    /// Promote a local addon to a managed ESOUI addon by linking its directory to
+    /// an existing ESOUI addon entry. This creates an `installed_addon` record and
+    /// removes the local addon records. The directory itself is NOT moved or renamed.
+    pub fn promote_local_to_esoui(
+        &self,
+        local_addon_id: i64,
+        esoui_addon_id: i64,
+    ) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            // Verify the ESOUI addon exists and fetch its details
+            let esoui_addon = DbAddon::Entity::find_by_id(esoui_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: esoui_addon_id })?;
+
+            // Create the installed_addon record (upsert on conflict)
+            InstalledAddon::Entity::insert(InstalledAddon::ActiveModel {
+                addon_id: ActiveValue::Set(esoui_addon_id),
+                version: ActiveValue::Set(esoui_addon.version.clone()),
+                date: ActiveValue::Set(esoui_addon.date.clone()),
+            })
+            .on_conflict(
+                OnConflict::column(InstalledAddon::Column::AddonId)
+                    .update_columns([
+                        InstalledAddon::Column::Date,
+                        InstalledAddon::Column::Version,
+                    ])
+                    .to_owned(),
+            )
+            .exec(&db)
+            .await
+            .context(error::DbPutSnafu)?;
+
+            // Delete installed_local_addon record (if any)
+            InstalledLocalAddon::Entity::delete_many()
+                .filter(InstalledLocalAddon::Column::LocalAddonId.eq(local_addon_id))
+                .exec(&db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+
+            // Fetch and delete local_addon record (cascade handles children)
+            let local_addon = LocalAddon::Entity::find_by_id(local_addon_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: local_addon_id })?;
+
+            let local_title = local_addon.title.clone();
+            let local_directory = local_addon.directory.clone();
+
+            local_addon
+                .into_active_model()
+                .delete(&db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+
+            info!(
+                "Promoted local addon '{}' ({}) to ESOUI addon {} (#{})",
+                local_title, local_directory, esoui_addon.name, esoui_addon_id
+            );
+            Ok(())
+        })
+    }
+
+    /// Pull a specific git repository and update metadata.
+    pub fn pull_git_repo(&self, repo_id: i64) -> ImmediateValuePromise<()> {
+        let db = self.db.clone();
+        let addon_dir = self.get_addon_dir().clone();
+        ImmediateValuePromise::new(async move {
+            let repo = GitRepo::Entity::find_by_id(repo_id)
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id: repo_id })?;
+
+            let repo_path = addon_dir.join(&repo.path);
+            if !repo_path.exists() {
+                Err(error::Error::AddonNotFound { id: repo_id })?;
+            }
+
+            // Pull the repository
+            git::pull_repository(&repo_path)?;
+
+            // Update last_updated timestamp
+            let now = chrono::Utc::now().to_rfc3339();
+            let repo_url = repo.url.clone();
+            let mut active: GitRepo::ActiveModel = repo.into_active_model();
+            active.last_updated = ActiveValue::Set(Some(now));
+            active.update(&db).await.context(error::DbPutSnafu)?;
+
+            info!("Pulled Git repository '{}' (id={})", repo_url, repo_id);
+            Ok(())
+        })
+    }
+
+    // endregion
+
     pub fn get_addons_by_author(
         &self,
         author: String,
@@ -1776,7 +2331,7 @@ where i.addon_id is null
         })
     }
 
-    pub fn get_addon_images(&self, addon_id: i32) -> ImmediateValuePromise<Vec<AddonImageResult>> {
+    pub fn get_addon_images(&self, addon_id: i64) -> ImmediateValuePromise<Vec<AddonImageResult>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
             let results = AddonImage::Entity::find()
@@ -1832,11 +2387,11 @@ where i.addon_id is null
             // Addons may have been removed from the site since the backup was created,
             // so we only insert entries whose addon_id still exists in the addon table.
             if !data.installed_addons.is_empty() {
-                let backup_ids: Vec<i32> =
+                let backup_ids: Vec<i64> =
                     data.installed_addons.iter().map(|a| a.addon_id).collect();
 
                 // Batch-check which backup IDs still exist in the addon table
-                let existing_ids: HashSet<i32> = DbAddon::Entity::find()
+                let existing_ids: HashSet<i64> = DbAddon::Entity::find()
                     .filter(DbAddon::Column::Id.is_in(backup_ids.clone()))
                     .all(&db)
                     .await?
@@ -1845,7 +2400,7 @@ where i.addon_id is null
                     .collect();
 
                 // Report addon IDs from the backup that no longer exist
-                let missing_ids: Vec<i32> = backup_ids
+                let missing_ids: Vec<i64> = backup_ids
                     .into_iter()
                     .filter(|id| !existing_ids.contains(id))
                     .collect();
@@ -1884,13 +2439,13 @@ where i.addon_id is null
                 ManualDependency::Entity::delete_many().exec(&db).await?;
 
                 // Batch-check which satisfied_by IDs still exist in the addon table
-                let satisfied_by_ids: Vec<i32> = data
+                let satisfied_by_ids: Vec<i64> = data
                     .manual_dependencies
                     .iter()
                     .filter_map(|x| x.satisfied_by)
                     .collect();
 
-                let existing_ids: HashSet<i32> = DbAddon::Entity::find()
+                let existing_ids: HashSet<i64> = DbAddon::Entity::find()
                     .filter(DbAddon::Column::Id.is_in(satisfied_by_ids.clone()))
                     .all(&db)
                     .await?
@@ -1899,7 +2454,7 @@ where i.addon_id is null
                     .collect();
 
                 // Report satisfied_by IDs from the backup that no longer exist
-                let missing_ids: Vec<i32> = satisfied_by_ids
+                let missing_ids: Vec<i64> = satisfied_by_ids
                     .into_iter()
                     .filter(|id| !existing_ids.contains(id))
                     .collect();
@@ -1962,7 +2517,7 @@ where i.addon_id is null
 async fn resolve_dirs_to_addons<C: ConnectionTrait>(
     db: &C,
     dirs: &[String],
-) -> Result<HashMap<String, i32>> {
+) -> Result<HashMap<String, i64>> {
     if dirs.is_empty() {
         return Ok(HashMap::new());
     }
@@ -1984,7 +2539,7 @@ async fn resolve_dirs_to_addons<C: ConnectionTrait>(
     Ok(rows
         .iter()
         .map(|row| {
-            let id: i32 = row.try_get_by(0).expect("query selects addon_id as i32");
+            let id: i64 = row.try_get_by(0).expect("query selects addon_id as i64");
             let dir: String = row.try_get_by(1).expect("query selects dir as text");
             (dir, id)
         })
@@ -1998,4 +2553,470 @@ fn check_db_result<T>(result: Result<T, DbErr>) -> Result<()> {
         Ok(_) | Err(DbErr::RecordNotInserted) => Ok(()),
         Err(e) => Err(e).context(error::DbPutSnafu),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Private async helpers for multi-source addon queries
+// ---------------------------------------------------------------------------
+
+/// Fetch local addon rows (join with installed state).
+async fn fetch_local_addons(db: &DatabaseConnection) -> Result<Vec<LocalInstalledAddon>> {
+    LocalAddon::Entity::find()
+        .column_as(LocalAddon::Column::Id, "id")
+        .column_as(LocalAddon::Column::Directory, "directory")
+        .column_as(LocalAddon::Column::Title, "title")
+        .column_as(LocalAddon::Column::Author, "author")
+        .column_as(LocalAddon::Column::Version, "version")
+        .column_as(LocalAddon::Column::AddOnVersion, "add_on_version")
+        .column_as(LocalAddon::Column::Description, "description")
+        .column_as(
+            InstalledLocalAddon::Column::InstalledVersion,
+            "installed_version",
+        )
+        .column_as(
+            InstalledLocalAddon::Column::InstalledAddOnVersion,
+            "installed_add_on_version",
+        )
+        .left_join(InstalledLocalAddon::Entity)
+        .into_model::<LocalInstalledAddon>()
+        .all(db)
+        .await
+        .context(error::DbGetSnafu)
+}
+
+/// Fetch git addon rows (join with installed state and repo info).
+async fn fetch_git_addons(db: &DatabaseConnection) -> Result<Vec<GitInstalledAddon>> {
+    GitAddon::Entity::find()
+        .column_as(GitAddon::Column::Id, "id")
+        .column_as(GitAddon::Column::GitRepoId, "repo_id")
+        .column_as(GitAddon::Column::Directory, "directory")
+        .column_as(GitAddon::Column::Title, "title")
+        .column_as(GitAddon::Column::Author, "author")
+        .column_as(GitAddon::Column::Version, "version")
+        .column_as(GitAddon::Column::AddOnVersion, "add_on_version")
+        .column_as(GitAddon::Column::Description, "description")
+        .column_as(GitAddon::Column::RemoteVersion, "remote_version")
+        .column_as(
+            GitAddon::Column::RemoteAddOnVersion,
+            "remote_add_on_version",
+        )
+        .column_as(
+            InstalledGitAddon::Column::InstalledVersion,
+            "installed_version",
+        )
+        .column_as(
+            InstalledGitAddon::Column::InstalledAddOnVersion,
+            "installed_add_on_version",
+        )
+        .column_as(GitRepo::Column::Url, "repo_url")
+        .left_join(InstalledGitAddon::Entity)
+        .inner_join(GitRepo::Entity)
+        .into_model::<GitInstalledAddon>()
+        .all(db)
+        .await
+        .context(error::DbGetSnafu)
+}
+
+/// Collect all installed addon directory names from the AddOns folder.
+fn get_all_installed_dirs(addon_dir: &Path) -> HashSet<String> {
+    let mut dirs = HashSet::new();
+
+    if let Ok(entries) = std::fs::read_dir(addon_dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
+                && let Some(name) = entry.file_name().to_str()
+            {
+                dirs.insert(name.to_string());
+            }
+        }
+    }
+
+    dirs
+}
+
+/// Parse the manifest for a non-ESOUI addon and return its hard dependencies
+/// as (dependency_dir, required_by_addon_name) pairs.
+fn parse_manifest_deps(
+    addon_dir: &Path,
+    addon_directory: &str,
+    addon_name: &str,
+) -> Vec<(String, String)> {
+    let addon_path = addon_dir.join(addon_directory);
+    let manifest_path = addon_path.join(format!("{addon_directory}.txt"));
+    let manifest_lower = addon_path.join(format!("{}.txt", addon_directory.to_lowercase()));
+
+    let mut result = Vec::new();
+
+    if let Some(m) =
+        parse_manifest_file(&manifest_path).or_else(|| parse_manifest_file(&manifest_lower))
+    {
+        for dep in &m.depends_on {
+            let dir_name = dep.title.clone();
+            result.push((dir_name, format!("{} ({})", addon_name, addon_directory)));
+        }
+    }
+
+    result
+}
+
+/// Find ESOUI addons that match a given dependency name (for suggestions).
+async fn find_esoui_suggestions(db: &DatabaseConnection, dep_name: &str) -> Vec<(i64, String)> {
+    let like_pattern = format!("%{}%", dep_name);
+    let suggestions = DbAddon::Entity::find()
+        .filter(DbAddon::Column::Name.like(&like_pattern))
+        .limit(5)
+        .all(db)
+        .await;
+
+    match suggestions {
+        Ok(rows) => rows.into_iter().map(|a| (a.id, a.name)).collect(),
+        Err(e) => {
+            warn!(
+                "Failed to query ESOUI suggestions for '{}': {}",
+                dep_name, e
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Check dependencies for a collection of non-ESOUI addons (git or local).
+/// Uses a closure to extract the directory and display name from each addon.
+async fn check_non_esoui_deps<T, F>(
+    db: &DatabaseConnection,
+    addon_dir: &Path,
+    addons: &[T],
+    mut dir_name: F,
+    all_dirs: &HashSet<String>,
+    seen: &mut HashSet<String>,
+    results: &mut Vec<AddonDepOption>,
+) where
+    F: FnMut(&T) -> (&str, &str),
+{
+    for addon in addons {
+        let (dir, display_name) = dir_name(addon);
+        let deps = parse_manifest_deps(addon_dir, dir, display_name);
+        for (dep_name, req_by) in deps {
+            if seen.contains(&dep_name) || all_dirs.contains(&dep_name) {
+                continue;
+            }
+            seen.insert(dep_name.clone());
+            let suggestions = find_esoui_suggestions(db, &dep_name).await;
+            results.push(AddonDepOption {
+                missing_dir: dep_name.clone(),
+                required_by: req_by.clone(),
+                option_id: None,
+                option_name: None,
+            });
+            for (sid, sname) in suggestions {
+                results.push(AddonDepOption {
+                    missing_dir: dep_name.clone(),
+                    required_by: req_by.clone(),
+                    option_id: Some(sid),
+                    option_name: Some(sname),
+                });
+            }
+        }
+    }
+}
+
+/// Fetch ESOUI installed addons. Scans the filesystem for manifests, detects
+/// untracked addons, registers nested sub-directories and dependencies, then
+/// returns the full installed set.
+async fn fetch_installed_esoui_addons(
+    db: &DatabaseConnection,
+    addon_dir: &Path,
+) -> Result<Vec<AddonShowDetails>> {
+    // 1. Check for untracked installed addons
+    info!("Checking for untracked addons");
+    // grab every dir under Addons/
+    let walker = WalkDir::new(addon_dir)
+        .min_depth(1)
+        .max_depth(1)
+        .into_iter();
+    let addon_dirs: Vec<String> = walker
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+    let mut addon_versions: HashMap<_, _> = addon_dirs
+        .into_iter()
+        .map(|d| (d, String::from("0")))
+        .collect();
+
+    // now check every txt and addon file matching the directory name to get the installed version
+    let parser = eso_addon_manifest::AddonManifestParser::default();
+    let walker = WalkDir::new(addon_dir)
+        .min_depth(2)
+        .max_depth(4)
+        .into_iter();
+    let mut manifest_deps: HashMap<String, Vec<String>> = HashMap::new();
+    let mut nested_dirs: HashMap<String, Vec<String>> = HashMap::new();
+    for entry in walker.filter_map(|e| e.ok()).filter(|e| {
+        let path = e.path();
+        let Some(parent_name) = path.parent().and_then(|p| p.file_name()) else {
+            return false;
+        };
+        let Some(stem) = path.file_stem() else {
+            return false;
+        };
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            return false;
+        };
+        path.is_file() && parent_name == stem && ["txt", "addon"].contains(&ext)
+    }) {
+        let parent = entry
+            .path()
+            .parent()
+            .expect("walker min_depth(2) guarantees a parent");
+        let Some(dir_name) = parent
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(String::from)
+        else {
+            continue;
+        };
+        let stripped = entry
+            .path()
+            .strip_prefix(addon_dir)
+            .expect("walker rooted at addon_dir");
+        let Some(top_level) = stripped
+            .components()
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .map(String::from)
+        else {
+            continue;
+        };
+        let Some(path_str) = entry.path().to_str() else {
+            warn!("Skipping non-UTF-8 manifest path {:?}", entry.path());
+            continue;
+        };
+        let manifest = match parser.parse(path_str, None) {
+            Ok(manifest) => manifest,
+            Err(err) => {
+                warn!("{}", err);
+                continue;
+            }
+        };
+        if dir_name != top_level {
+            // nested sub-addon, e.g. CombatMetrics/CombatMetricsFightData/
+            nested_dirs.entry(top_level).or_default().push(dir_name);
+            continue;
+        }
+        let new_version = manifest.version.unwrap_or_else(|| "0".to_string());
+        if let Some(version) = addon_versions.get(&dir_name) {
+            let should_update = if version == "0" {
+                !new_version.trim().is_empty() && new_version != "0"
+            } else {
+                match (Version::from(version), Version::from(&new_version)) {
+                    (Some(current), Some(candidate)) => current < candidate,
+                    (None, Some(_)) => true,
+                    _ => false,
+                }
+            };
+            if should_update {
+                addon_versions.insert(dir_name.clone(), new_version);
+            }
+        }
+        if !manifest.depends_on.is_empty() {
+            manifest_deps.insert(
+                dir_name,
+                manifest.depends_on.into_iter().map(|d| d.title).collect(),
+            );
+        }
+    }
+
+    // check database for any untracked addons
+    let keys: Vec<String> = addon_versions.keys().cloned().collect();
+    let placeholders = vec!["?"; keys.len()].join(", ");
+    let sql = format!(
+        r#"SELECT
+	a.id,
+	a.name,
+	d.dir,
+	a.download_monthly
+from addon a
+inner join addon_dir d on a.id = d.addon_id
+inner join (
+SELECT
+	d.dir,
+	max(cast(a.download_monthly as int)) download_monthly
+from addon_dir d
+inner join addon a on d.addon_id = a.id
+where d.dir in ({})
+GROUP by d.dir) m on d.dir = m.dir and a.download_monthly = m.download_monthly
+left outer join installed_addon i on a.id = i.addon_id
+where i.addon_id is null
+    and d.dir not in (
+        select d.dir
+        from addon_dir d
+        inner join installed_addon i on d.addon_id = i.addon_id
+    )"#,
+        placeholders
+    );
+
+    let db_results = db
+        .query_all_raw(Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Sqlite,
+            &sql,
+            keys.iter().map(|k| k.into()).collect::<Vec<_>>(),
+        ))
+        .await
+        .context(error::DbGetSnafu)?;
+    let now = format!("{}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+    let mut detected_versions: HashMap<i64, String> = HashMap::with_capacity(db_results.len());
+
+    for x in db_results.iter() {
+        let addon_id: i64 = x.try_get_by(0).context(error::DbGetSnafu)?;
+        let dir: String = x.try_get_by(2).context(error::DbGetSnafu)?;
+
+        let candidate_version = addon_versions
+            .get(&dir)
+            .cloned()
+            .unwrap_or_else(|| "0".to_string());
+
+        let selected_version = detected_versions
+            .entry(addon_id)
+            .or_insert_with(|| "0".to_string());
+
+        if candidate_version.trim().is_empty() || candidate_version == "0" {
+            continue;
+        }
+
+        let should_update = if selected_version == "0" {
+            true
+        } else {
+            match (
+                Version::from(&*selected_version),
+                Version::from(&candidate_version),
+            ) {
+                (Some(current), Some(candidate)) => current < candidate,
+                (None, Some(_)) => true,
+                _ => false,
+            }
+        };
+
+        if should_update {
+            *selected_version = candidate_version;
+        }
+    }
+
+    let inserts: Vec<InstalledAddon::ActiveModel> = detected_versions
+        .into_iter()
+        .map(|(addon_id, version)| InstalledAddon::ActiveModel {
+            addon_id: ActiveValue::Set(addon_id),
+            version: ActiveValue::Set(version),
+            date: ActiveValue::Set(now.to_string()),
+        })
+        .collect();
+
+    // 2. insert as installed, update checks will handle the rest
+    if !inserts.is_empty() {
+        info!("Adding {} untracked addons", inserts.len());
+        InstalledAddon::Entity::insert_many(inserts)
+            .exec(db)
+            .await
+            .context(error::DbPutSnafu)?;
+    }
+
+    // Register nested sub-addon dirs under the parent's addon_id.
+    if !nested_dirs.is_empty() {
+        let parent_dirs: Vec<String> = nested_dirs.keys().cloned().collect();
+        let parent_to_addon = resolve_dirs_to_addons(db, &parent_dirs).await?;
+
+        let mut dir_inserts: Vec<AddonDir::ActiveModel> =
+            Vec::with_capacity(nested_dirs.values().map(|v| v.len()).sum());
+        for (parent, subs) in nested_dirs {
+            let Some(&addon_id) = parent_to_addon.get(&parent) else {
+                continue;
+            };
+            for sub in subs {
+                dir_inserts.push(AddonDir::ActiveModel {
+                    addon_id: ActiveValue::Set(addon_id),
+                    dir: ActiveValue::Set(sub),
+                });
+            }
+        }
+        if !dir_inserts.is_empty() {
+            let result = AddonDir::Entity::insert_many(dir_inserts)
+                .on_conflict(
+                    OnConflict::columns([AddonDir::Column::AddonId, AddonDir::Column::Dir])
+                        .do_nothing()
+                        .to_owned(),
+                )
+                .exec(db)
+                .await;
+            check_db_result(result)?;
+        }
+    }
+
+    // Refresh dependency rows from manifests
+    if !manifest_deps.is_empty() {
+        let manifest_dirs: Vec<String> = manifest_deps.keys().cloned().collect();
+        let addon_for_dir = resolve_dirs_to_addons(db, &manifest_dirs).await?;
+
+        let affected: Vec<i64> = addon_for_dir.values().copied().collect();
+        if !affected.is_empty() {
+            AddonDep::Entity::delete_many()
+                .filter(AddonDep::Column::AddonId.is_in(affected))
+                .exec(db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+        }
+
+        let mut dep_inserts: Vec<AddonDep::ActiveModel> =
+            Vec::with_capacity(manifest_deps.values().map(|v| v.len()).sum());
+        for (dir, deps) in manifest_deps {
+            let Some(&addon_id) = addon_for_dir.get(&dir) else {
+                continue;
+            };
+            for dep_title in deps {
+                dep_inserts.push(AddonDep::ActiveModel {
+                    addon_id: ActiveValue::Set(addon_id),
+                    dependency_dir: ActiveValue::Set(dep_title),
+                });
+            }
+        }
+        if !dep_inserts.is_empty() {
+            let result = AddonDep::Entity::insert_many(dep_inserts)
+                .on_conflict(
+                    OnConflict::columns([
+                        AddonDep::Column::AddonId,
+                        AddonDep::Column::DependencyDir,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .exec(db)
+                .await;
+            check_db_result(result)?;
+        }
+    }
+
+    info!("Getting installed addons");
+    // 3. Get the full installed set along with installed version
+    let results = DbAddon::Entity::find()
+        .column_as(DbAddon::Column::Version, "version")
+        .column_as(InstalledAddon::Column::Version, "installed_version")
+        .column_as(InstalledAddon::Column::AddonId.is_not_null(), "installed")
+        .column_as(Category::Column::Title, "category")
+        .column_as(Expr::value("NULL"), "description")
+        .column_as(Expr::value("NULL"), "change_log")
+        .column_as(Expr::value("NULL"), "game_compat_version")
+        .column_as(Expr::value("NULL"), "game_compat_name")
+        .column_as(Category::Column::Icon, "category_icon")
+        .inner_join(Category::Entity)
+        .inner_join(InstalledAddon::Entity)
+        .into_model::<AddonShowDetails>()
+        .all(db)
+        .await
+        .context(error::DbGetSnafu)?;
+    info!("Done getting addons!");
+    Ok(results)
 }

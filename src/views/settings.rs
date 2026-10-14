@@ -11,12 +11,12 @@ use rfd::AsyncFileDialog;
 use crate::views::View;
 use crate::{REPO, VERSION};
 
-use super::ui_helpers::{AddonResponse, AddonResponseType, PromisedValue};
+use super::ui_helpers::{AddonResponse, AddonResponseType, InstalledAddonSource, PromisedValue};
 
 /// TamrielTradeCentre addon id, required for the TTC PriceTable update.
-const TTC_ADDON_ID: i32 = 1245;
+const TTC_ADDON_ID: i64 = 1245;
 /// HarvestMap-Data addon id, required for the HarvestMap data update.
-const HM_DATA_ADDON_ID: i32 = 3034;
+const HM_DATA_ADDON_ID: i64 = 3034;
 
 #[derive(Default)]
 pub struct Settings {
@@ -35,10 +35,10 @@ pub struct Settings {
 
     clear_cache: Option<PromisedValue<()>>,
 
-    installed_ids: HashSet<i32>,
+    installed_ids: HashSet<i64>,
 }
 impl Settings {
-    pub fn set_installed_ids(&mut self, ids: HashSet<i32>) {
+    pub fn set_installed_ids(&mut self, ids: HashSet<i64>) {
         self.installed_ids = ids;
     }
 
@@ -173,6 +173,7 @@ impl View for Settings {
                 ui.label("requires app restart to take effect")
             });
             let mut updates_changed = false;
+            ui.add_space(5.0);
             egui::ComboBox::from_label("UI Scale").selected_text(format!("{:.2?}x", service.config.pixels_per_point)).show_ui(ui, |ui| {
                 updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 1.0, "1.0x").changed();
                 updates_changed |= ui.selectable_value(&mut service.config.pixels_per_point, 1.25, "1.25x").changed();
@@ -296,6 +297,18 @@ impl View for Settings {
                     last.format("%Y-%m-%d %H:%M UTC")
                 ));
             }
+            ui.horizontal(|ui| {
+                updates_changed |= ui
+                    .add_enabled(
+                        service.git_available,
+                        egui::Checkbox::new(
+                            &mut service.config.pull_git_repositories,
+                            "Pull Git repositories",
+                        ),
+                    )
+                    .changed();
+                ui.label("(requires Git to be available in PATH)");
+            });
             if updates_changed {
                 service.save_config();
             }
@@ -436,7 +449,7 @@ impl View for Settings {
 
 /// Warn that an update is enabled without its addon installed, with a link to
 /// open the addon's detail view to install it.
-fn install_warning(ui: &mut egui::Ui, response: &mut AddonResponse, name: &str, addon_id: i32) {
+fn install_warning(ui: &mut egui::Ui, response: &mut AddonResponse, name: &str, addon_id: i64) {
     ui.horizontal_wrapped(|ui| {
         ui.colored_label(
             ui.visuals().warn_fg_color,
@@ -444,6 +457,7 @@ fn install_warning(ui: &mut egui::Ui, response: &mut AddonResponse, name: &str, 
         );
         if ui.link(format!("Install {name}")).clicked() {
             response.addon_id = addon_id;
+            response.source = InstalledAddonSource::Esoui { esoui_id: addon_id };
             response.response_type = AddonResponseType::AddonName;
         }
     });
