@@ -72,3 +72,19 @@ pub(super) fn pull_repository(path: &Path) -> Result<()> {
     info!("Pulled Git repository {}", path.display());
     Ok(())
 }
+
+/// Get the URL of the default remote (origin).
+pub(super) fn get_remote_url(path: &Path) -> Result<String> {
+    let output = git_success(path, &["remote", "get-url", "origin"])?;
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if url.is_empty() {
+        return Err(error::GitCommandFailedSnafu {
+            command: "remote get-url origin".to_string(),
+            path: path.to_path_buf(),
+            status: std::process::ExitStatus::default(),
+            stderr: "Empty remote URL".to_string(),
+        }
+        .build());
+    }
+    Ok(url)
+}

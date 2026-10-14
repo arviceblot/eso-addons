@@ -10,7 +10,7 @@ use super::ui_helpers::{AddonResponse, AddonResponseType};
 pub struct MissingDeps {
     missing_deps: HashMap<String, MissingDepView>,
     addon_map: AddonMap,
-    rev_addon_map: HashMap<String, i32>,
+    rev_addon_map: HashMap<String, i64>,
 }
 impl MissingDeps {
     pub fn new() -> Self {
@@ -123,7 +123,7 @@ impl View for MissingDeps {
                                 .width(200.0)
                                 .show_ui(ui, |ui| {
                                     for (name, id) in self.rev_addon_map.iter() {
-                                        let mut val = 0;
+                                        let mut val = 0i64;
                                         ui.selectable_value(&mut val, *id, name);
                                         if val != 0 {
                                             dep_opt.satisfied_by = Some(val);

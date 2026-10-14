@@ -7,6 +7,8 @@ mod m20230519_153409_manual_deps;
 mod m20240212_164739_update_0_category;
 mod m20240214_174800_add_game_version;
 mod m20240219_192429_add_addon_images;
+mod m20261010_000001_multiple_sources;
+mod m20261013_000001_child_table_indexes;
 
 pub struct Migrator;
 
@@ -21,6 +23,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20240212_164739_update_0_category::Migration),
             Box::new(m20240214_174800_add_game_version::Migration),
             Box::new(m20240219_192429_add_addon_images::Migration),
+            Box::new(m20261010_000001_multiple_sources::Migration),
+            Box::new(m20261013_000001_child_table_indexes::Migration),
         ]
     }
 }

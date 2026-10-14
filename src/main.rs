@@ -4,7 +4,10 @@ use dotenv::dotenv;
 use eframe::egui::{self, RichText, Visuals, vec2};
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
-use eso_addons_core::service::result::{AddonDepOption, AddonShowDetails, UpdateResult};
+use eso_addons_core::service::result::{
+    AddonDepOption, AddonShowDetails, GitAddonResult, LocalAddonResult, ManifestAddonDetails,
+    UpdateResult,
+};
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
 use std::io;
@@ -23,7 +26,10 @@ use views::missing_deps::MissingDeps;
 use views::onboard::Onboard;
 use views::search::Search;
 use views::settings::Settings;
-use views::ui_helpers::{AddonResponse, AddonResponseType, PromisedValue, ViewOpt};
+use views::ui_helpers::{
+    AddonResponse, AddonResponseType, InstalledAddonRow, InstalledAddonSource, PromisedValue,
+    ViewOpt,
+};
 use views::{ResetView, View};
 
 const APP_NAME: &str = "ESO Addon Manager";
@@ -95,13 +101,17 @@ struct EamApp {
     service: AddonService,
     /// Addon management promises
     remove: PromisedValue<()>,
-    update_one: HashMap<i32, PromisedValue<()>>,
-    install_one: HashMap<i32, PromisedValue<()>>,
+    update_one: HashMap<i64, PromisedValue<()>>,
+    install_one: HashMap<i64, PromisedValue<()>>,
     installed_addons: PromisedValue<Vec<AddonShowDetails>>,
     update: PromisedValue<UpdateResult>,
     ttc_pricetable: PromisedValue<config::TtcConfigUpdate>,
     hm_data: Option<ImmediateValuePromise<config::HmConfigUpdate>>,
     git_pull: PromisedValue<()>,
+    /// Scan results for local addons
+    scan_local: PromisedValue<Vec<LocalAddonResult>>,
+    /// Scan results for git addons
+    scan_git: PromisedValue<Vec<GitAddonResult>>,
     missing_deps: PromisedValue<Vec<AddonDepOption>>,
     install_missing_deps: PromisedValue<()>,
     /// Only auto-nav to MissingDeps when newly discovered, not on every refresh.
@@ -159,6 +169,8 @@ impl EamApp {
             ttc_pricetable: PromisedValue::default(),
             hm_data: None,
             git_pull: PromisedValue::default(),
+            scan_local: PromisedValue::default(),
+            scan_git: PromisedValue::default(),
             missing_deps: PromisedValue::default(),
             install_missing_deps: PromisedValue::default(),
             had_missing_deps: false,
@@ -237,7 +249,22 @@ impl EamApp {
             self.installed_addons
                 .poll_recording(&self.service, "Loading installed addons");
         }
-        if self.installed_addons.is_ready() {
+
+        // Poll local and git addon scans
+        self.scan_local
+            .poll_recording(&self.service, "Scanning local addons");
+        self.scan_git
+            .poll_recording(&self.service, "Scanning Git addons");
+
+        // Check for changes across all three sources before handling any of them.
+        // `is_ready()` returns true only for unhandled new data.
+        let esoui_changed = self.installed_addons.is_ready();
+        let local_changed = self.scan_local.is_ready();
+        let git_changed = self.scan_git.is_ready();
+        let any_changed = esoui_changed || local_changed || git_changed;
+
+        // Handle ESOUI-specific logic when data is fresh
+        if esoui_changed {
             self.installed_addons.handle();
             // check missing dependencies
             self.check_missing_deps();
@@ -245,33 +272,117 @@ impl EamApp {
             let installed = self.installed_addons.value.as_ref().unwrap();
             self.settings
                 .set_installed_ids(installed.iter().map(|a| a.id).collect());
-            self.installed_view = Installed::new().displayed_addons(installed.to_owned());
+
+            // Scan for local and git addons after ESOUI data is loaded.
+            // This ensures installed_addon table is populated so the local scan
+            // can correctly skip directories managed by ESOUI and avoid duplicates.
+            // Only trigger if a scan isn't already in progress to avoid concurrent
+            // upserts racing on the read-then-insert pattern.
+            if !self.scan_local.is_polling() {
+                self.scan_local.set(self.service.scan_local_addons());
+            }
+            if !self.scan_git.is_polling() {
+                self.scan_git.set(self.service.scan_git_addons());
+            }
+        }
+
+        // Handle scan results so is_ready() returns false on next cycle
+        if local_changed {
+            self.scan_local.handle();
+        }
+        if git_changed {
+            self.scan_git.handle();
+        }
+
+        // Populate unified view when data has actually changed and all sources are ready
+        if any_changed
+            && let (Some(esoui), Some(local), Some(git)) = (
+                &self.installed_addons.value,
+                &self.scan_local.value,
+                &self.scan_git.value,
+            )
+        {
+            let local_rows: Vec<InstalledAddonRow> = local
+                .iter()
+                .map(|a| InstalledAddonRow {
+                    id: a.id,
+                    name: a.title.clone(),
+                    author: a.author.clone(),
+                    version: a.version.clone().unwrap_or_default(),
+                    installed_version: None,
+                    is_upgradable: false,
+                    category: a.category.clone().unwrap_or_else(|| "Addons".to_string()),
+                    category_icon: None,
+                    source: InstalledAddonSource::Local {
+                        local_addon_id: a.id,
+                    },
+                    esoui_match_id: a.esoui_match_id,
+                    download_total: None,
+                    download_monthly: None,
+                    favorite_total: None,
+                })
+                .collect();
+
+            let git_rows: Vec<InstalledAddonRow> = git
+                .iter()
+                .map(|a| InstalledAddonRow {
+                    id: a.id,
+                    name: a.title.clone(),
+                    author: a.author.clone(),
+                    version: a
+                        .remote_version
+                        .clone()
+                        .unwrap_or_else(|| a.version.clone().unwrap_or_default()),
+                    installed_version: a.version.clone(),
+                    is_upgradable: a.is_upgradable,
+                    category: a.category.clone().unwrap_or_else(|| "Addons".to_string()),
+                    category_icon: None,
+                    source: InstalledAddonSource::Git {
+                        git_addon_id: a.id,
+                        url: a.repo_url.clone(),
+                    },
+                    esoui_match_id: None,
+                    download_total: None,
+                    download_monthly: None,
+                    favorite_total: None,
+                })
+                .collect();
+
+            self.installed_view =
+                Installed::new().set_addons(esoui.to_owned(), local_rows, git_rows);
         }
 
         self.missing_deps
             .poll_recording(&self.service, "Checking missing dependencies");
         if self.missing_deps.is_ready() {
-            self.missing_deps.handle();
-            let deps = self.missing_deps.value.as_ref().unwrap().to_owned();
-            let has_missing = !deps.is_empty();
-            self.missing_dep.set_addons(
-                self.installed_addons
-                    .value
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|x| (x.id, x.name.to_string()))
-                    .collect(),
-            );
-            self.missing_dep.set_deps(deps);
-            if has_missing {
-                if !self.had_missing_deps {
-                    self.change_view(ViewOpt::MissingDeps);
+            // Guard: if installed_addons was refreshed concurrently (e.g. after an
+            // update or git pull), its value may be None until the new fetch
+            // completes. In that case, defer processing until it's ready again.
+            if self.installed_addons.value.is_none() {
+                self.missing_deps.unhandle();
+            } else {
+                self.missing_deps.handle();
+                let deps = self.missing_deps.value.as_ref().unwrap().to_owned();
+                let has_missing = !deps.is_empty();
+                self.missing_dep.set_addons(
+                    self.installed_addons
+                        .value
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|x| (x.id, x.name.to_string()))
+                        .collect(),
+                );
+                self.missing_dep.set_deps(deps);
+                if has_missing {
+                    if !self.had_missing_deps {
+                        self.change_view(ViewOpt::MissingDeps);
+                    }
+                } else if self.view == ViewOpt::MissingDeps {
+                    self.close_view();
                 }
-            } else if self.view == ViewOpt::MissingDeps {
-                self.close_view();
+                self.had_missing_deps = has_missing;
             }
-            self.had_missing_deps = has_missing;
         }
 
         // poll installing missing dependencies
@@ -329,8 +440,40 @@ impl EamApp {
 
     // region: View Management
 
-    fn handle_addon_selected(&mut self, addon_id: i32) {
-        self.details.set_addon(addon_id, &mut self.service);
+    fn handle_addon_selected(&mut self, addon_id: i64, source: InstalledAddonSource) {
+        match source {
+            InstalledAddonSource::Esoui { esoui_id } => {
+                self.details.set_addon(esoui_id, &mut self.service);
+            }
+            InstalledAddonSource::Local { local_addon_id } => {
+                if let Some(ref local_scan) = self.scan_local.value
+                    && let Some(result) = local_scan.iter().find(|a| a.id == local_addon_id)
+                {
+                    self.details
+                        .set_manifest_addon(ManifestAddonDetails::from(result), &mut self.service);
+                    if self.view != ViewOpt::Details {
+                        self.change_view(ViewOpt::Details);
+                    }
+                    return;
+                }
+                // Fallback: treat as ESOUI
+                self.details.set_addon(addon_id, &mut self.service);
+            }
+            InstalledAddonSource::Git { git_addon_id, .. } => {
+                if let Some(ref git_scan) = self.scan_git.value
+                    && let Some(result) = git_scan.iter().find(|a| a.id == git_addon_id)
+                {
+                    self.details
+                        .set_manifest_addon(ManifestAddonDetails::from(result), &mut self.service);
+                    if self.view != ViewOpt::Details {
+                        self.change_view(ViewOpt::Details);
+                    }
+                    return;
+                }
+                // Fallback: treat as ESOUI
+                self.details.set_addon(addon_id, &mut self.service);
+            }
+        }
         if self.view != ViewOpt::Details {
             self.change_view(ViewOpt::Details);
         }
@@ -360,25 +503,28 @@ impl EamApp {
     fn handle_addons_changed(&mut self) {
         // update installed addons
         self.get_installed_addons();
+        // re-scan local and git addons
+        self.scan_local.set(self.service.scan_local_addons());
+        self.scan_git.set(self.service.scan_git_addons());
         // update views
         self.search.reset(&mut self.service);
         self.details.reset(&mut self.service);
         self.author_view.reset(&mut self.service);
     }
 
-    fn remove_addon(&mut self, addon_id: i32) {
+    fn remove_addon(&mut self, addon_id: i64) {
         let mut promise = PromisedValue::<()>::default();
         promise.set(self.service.remove(addon_id));
         self.remove = promise;
     }
 
-    fn update_addon(&mut self, addon_id: i32) {
+    fn update_addon(&mut self, addon_id: i64) {
         let mut promise = PromisedValue::<()>::default();
         promise.set(self.service.install(addon_id, true));
         self.update_one.insert(addon_id, promise);
     }
 
-    fn install_addon(&mut self, addon_id: i32) {
+    fn install_addon(&mut self, addon_id: i64) {
         let mut promise = PromisedValue::<()>::default();
         promise.set(self.service.install(addon_id, false));
         self.install_one.insert(addon_id, promise);
@@ -459,7 +605,11 @@ impl eframe::App for EamApp {
         self.poll();
 
         // if we are loading addons, show spinner and that's it
-        if self.update.is_polling() || self.installed_addons.is_polling() {
+        if self.update.is_polling()
+            || self.installed_addons.is_polling()
+            || self.scan_local.is_polling()
+            || self.scan_git.is_polling()
+        {
             egui::CentralPanel::default().show(ui, |ui| {
                 // ui.vertical_centered_justified(|ui| {
                 ui.centered_and_justified(|ui| {
@@ -555,6 +705,18 @@ impl eframe::App for EamApp {
                             ui.label("Pulling Git repositories");
                         });
                     }
+                    if self.scan_local.is_polling() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Scanning local addons");
+                        });
+                    }
+                    if self.scan_git.is_polling() {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Scanning Git addons");
+                        });
+                    }
                     let installing_count =
                         self.install_one.values().filter(|x| x.is_polling()).count();
                     if installing_count > 0 {
@@ -600,7 +762,7 @@ impl eframe::App for EamApp {
 
             match response.response_type {
                 AddonResponseType::AddonName => {
-                    self.handle_addon_selected(response.addon_id);
+                    self.handle_addon_selected(response.addon_id, response.source);
                 }
                 AddonResponseType::AuthorName => {
                     self.author_view
@@ -634,6 +796,23 @@ impl eframe::App for EamApp {
                 }
                 AddonResponseType::Remove => {
                     self.remove_addon(response.addon_id);
+                }
+                AddonResponseType::RemoveLocal => {
+                    self.service.uninstall_local_addon(response.local_addon_id);
+                    self.handle_addons_changed();
+                }
+                AddonResponseType::RemoveGitAddon => {
+                    self.service.uninstall_git_addon(response.git_addon_id);
+                    self.handle_addons_changed();
+                }
+                AddonResponseType::PullGitRepo => {
+                    self.service.pull_git_repo(response.git_repo_id);
+                    self.handle_addons_changed();
+                }
+                AddonResponseType::PromoteLocalToEsoui => {
+                    self.service
+                        .promote_local_to_esoui(response.local_addon_id, response.addon_id);
+                    self.handle_addons_changed();
                 }
                 AddonResponseType::AddonsChanged => {
                     self.handle_addons_changed();

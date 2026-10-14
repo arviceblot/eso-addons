@@ -115,10 +115,10 @@ pub enum Error {
     HarvestMapDataNotInstalled,
 
     #[snafu(display("Addon {} not found", id))]
-    AddonNotFound { id: i32 },
+    AddonNotFound { id: i64 },
 
     #[snafu(display("Addon {} has no download URL", id))]
-    AddonMissingDownloadUrl { id: i32 },
+    AddonMissingDownloadUrl { id: i64 },
 
     #[snafu(display("Unable to run git {} in {}: {}", command, path.display(), source))]
     GitCommandStart {
