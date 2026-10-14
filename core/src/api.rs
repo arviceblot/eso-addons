@@ -82,7 +82,7 @@ impl ApiClient {
         Ok(res)
     }
 
-    pub async fn get_file_details(&self, id: i32) -> Result<FileDetails> {
+    pub async fn get_file_details(&self, id: i64) -> Result<FileDetails> {
         let req_url = format!("{}{}.json", self.file_details_url, id);
         let res = self.req_url::<Vec<FileDetails>>(&req_url).await?;
         res.into_iter()
