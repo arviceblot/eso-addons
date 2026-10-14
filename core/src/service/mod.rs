@@ -1168,7 +1168,7 @@ impl AddonService {
                 None => continue,
             };
 
-            if (file.name()).ends_with('/') {
+            if file.is_dir() {
                 fs::create_dir_all(&outpath)
                     .context(error::AddonDownloadZipExtractSnafu { path: outpath })?;
             } else {
@@ -1237,14 +1237,32 @@ impl AddonService {
                 }
 
                 let url = format!("https://{domain}/download/PriceTable");
-                service
+                match service
                     .base_fs_download_extract(&url, Some("TamrielTradeCentre"), None)
-                    .await?;
-                downloaded = true;
-                if domain == TTC_NA_DOMAIN {
-                    update.na_version = server_version;
-                } else {
-                    update.eu_version = server_version;
+                    .await
+                {
+                    Ok(_) => {
+                        downloaded = true;
+                        if domain == TTC_NA_DOMAIN {
+                            update.na_version = server_version;
+                        } else {
+                            update.eu_version = server_version;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("TTC PriceTable {domain} download/extract failed: {e}");
+                        service.record_error(
+                            format!("Updating TTC PriceTable ({domain})"),
+                            e.to_string(),
+                        );
+                        // Still advance the version tracking so a stale local copy
+                        // doesn't cause a permanent retry loop on every launch.
+                        if domain == TTC_NA_DOMAIN {
+                            update.na_version = server_version;
+                        } else {
+                            update.eu_version = server_version;
+                        }
+                    }
                 }
             }
 
