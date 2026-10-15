@@ -1307,6 +1307,118 @@ impl AddonService {
         })
     }
 
+    /// Scan all discovered Minion backup directories for `BU-*.zip` files.
+    ///
+    /// Returns a list of [`MinionBackupEntry`] sorted by file name descending
+    /// (newest first).
+    pub fn scan_minion_backups(&self) -> ImmediateValuePromise<Vec<MinionBackupEntry>> {
+        ImmediateValuePromise::new(async {
+            let game_dirs = config::detect_minion_backup_dirs();
+            let mut entries: Vec<MinionBackupEntry> = Vec::new();
+
+            for game_dir in game_dirs {
+                let environment = match game_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_lowercase())
+                    .as_deref()
+                {
+                    Some("eso-1") => MinionEnvironment::Live,
+                    Some("eso-2") => MinionEnvironment::Beta,
+                    _ => MinionEnvironment::Beta,
+                };
+
+                let Ok(read_dir) = fs::read_dir(&game_dir) else {
+                    warn!(
+                        "Unable to read Minion backup directory: {}",
+                        game_dir.display()
+                    );
+                    continue;
+                };
+
+                for entry in read_dir.filter_map(|e| e.ok()) {
+                    let file_name = entry.file_name();
+                    let name = file_name.to_string_lossy();
+                    if name.starts_with("BU-") && name.ends_with(".zip") {
+                        entries.push(MinionBackupEntry {
+                            path: entry.path(),
+                            label: name.trim_end_matches(".zip").to_string(),
+                            environment,
+                        });
+                    }
+                }
+            }
+
+            // Sort by label descending so newest backups appear first.
+            entries.sort_by(|a, b| b.label.cmp(&a.label));
+            Ok(entries)
+        })
+    }
+
+    /// Import addons from a Minion backup `.zip` file.
+    ///
+    /// Extracts `BU-addons.txt` from the archive and feeds the comma-separated
+    /// addon IDs into the existing install pipeline.
+    pub fn import_minion_backup(&mut self, zip_path: &Path) -> ImmediateValuePromise<()> {
+        let service = self.clone();
+        let filepath = zip_path.to_path_buf();
+
+        ImmediateValuePromise::new(async move {
+            let file = File::open(&filepath).context(error::IoSnafu {
+                path: filepath.as_path(),
+            })?;
+            let mut archive = ZipArchive::new(file).context(error::MinionZipArchiveSnafu {
+                path: filepath.as_path(),
+            })?;
+
+            // Locate BU-addons.txt inside the zip.
+            let txt_index = archive
+                .file_names()
+                .position(|name| name.contains("BU-addons.txt"))
+                .context(error::MinionZipFileNotFoundSnafu {
+                    name: "BU-addons.txt",
+                    path: filepath.as_path(),
+                })?;
+
+            let mut txt_file =
+                archive
+                    .by_index(txt_index)
+                    .context(error::MinionZipFileReadSnafu {
+                        name: "BU-addons.txt",
+                        path: filepath.as_path(),
+                    })?;
+
+            let mut line = String::new();
+            txt_file.read_to_string(&mut line).context(error::IoSnafu {
+                path: filepath.as_path(),
+            })?;
+
+            let ids: Vec<i64> = line
+                .split(',')
+                .filter(|x| !x.is_empty())
+                .filter_map(|raw| {
+                    raw.trim()
+                        .parse::<i64>()
+                        .map_err(|e| {
+                            service.record_error(
+                                format!("Importing Minion backup {}", filepath.display()),
+                                format!("Skipping non-integer addon id {raw:?}: {e}"),
+                            );
+                        })
+                        .ok()
+                })
+                .collect();
+
+            for addon_id in ids {
+                if let Err(e) = service.p_install(addon_id, false).await {
+                    let label = service.addon_label(addon_id).await;
+                    service.record_error(format!("Error installing {label}"), e);
+                }
+            }
+            Ok(())
+        })
+    }
+
     pub fn get_categories(&self) -> ImmediateValuePromise<Vec<CategoryResult>> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {

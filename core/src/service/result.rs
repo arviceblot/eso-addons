@@ -4,6 +4,7 @@ use entity::category::Model as Category;
 use sea_orm::FromQueryResult;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // Multi-source addon types
@@ -432,4 +433,24 @@ pub struct GitInstalledAddon {
     pub remote_add_on_version: Option<i64>,
     pub installed_version: Option<String>,
     pub installed_add_on_version: Option<i64>,
+}
+
+/// A single Minion backup file discovered during auto-scan.
+#[derive(Debug, Clone)]
+pub struct MinionBackupEntry {
+    /// Full path to the `.zip` file on disk.
+    pub path: PathBuf,
+    /// Human-readable label shown in the UI (file name minus extension).
+    pub label: String,
+    /// Game environment: `live` for ESO-1, `beta` for ESO-2.
+    pub environment: MinionEnvironment,
+}
+
+/// Minion game environment (derived from the ESO-1 / ESO-2 folder name).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinionEnvironment {
+    /// ESO-1 — live server
+    Live,
+    /// ESO-2 — beta / PTS
+    Beta,
 }

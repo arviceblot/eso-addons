@@ -140,6 +140,25 @@ pub enum Error {
 
     #[snafu(display("Local commits in {} are not present in upstream; repository was not updated", path.display()))]
     GitLocalCommits { path: PathBuf },
+
+    #[snafu(display("Error reading file at {}: {}", path.display(), source))]
+    Io { source: io::Error, path: PathBuf },
+
+    #[snafu(display("Error opening Minion backup zip at {}: {}", path.display(), source))]
+    MinionZipArchive {
+        source: zip::result::ZipError,
+        path: PathBuf,
+    },
+
+    #[snafu(display("File '{}' not found in Minion backup zip at {}", name, path.display()))]
+    MinionZipFileNotFound { name: String, path: PathBuf },
+
+    #[snafu(display("Error reading '{}' from Minion backup zip at {}: {}", name, path.display(), source))]
+    MinionZipFileRead {
+        source: zip::result::ZipError,
+        name: String,
+        path: PathBuf,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
