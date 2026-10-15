@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::ser::SerializeStruct;
 use serde_derive::{Deserialize, Serialize};
 use snafu::ResultExt;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 use version_compare::Version;
@@ -24,6 +24,16 @@ const DEFAULT_ADDON_DIR: &str = "drive_c/users/user/My Documents/Elder Scrolls O
 
 #[cfg(target_os = "windows")]
 const DEFAULT_ADDON_DIR: &str = "Documents/Elder Scrolls Online/live/AddOns";
+
+/// Minion backup subdirectory (same across all platforms).
+const MINION_BACKUP_SUBDIR: &str = ".minion/minion-backups";
+
+/// Minion backup subdirectory inside a Flatpak sandbox.
+const FLATPAK_MINION_BACKUP_SUBDIR: &str = ".var/app/gg.minion.Minion/.minion/minion-backups";
+
+/// ESO game folder names used by Minion.
+/// `ESO-1` = live, `ESO-2` = beta/PTS.
+const MINION_ESO_GAME_FOLDERS: &[&str] = &["ESO-1", "ESO-2"];
 
 // service crate version
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -270,4 +280,46 @@ pub fn detect_addon_dir() -> PathBuf {
         }
     }
     addon_dir
+}
+
+/// Returns Minion backup game directories that exist on disk.
+///
+/// Checks the native `~/.minion/minion-backups/` location and, on Linux,
+/// the Flatpak sandbox equivalent `~/.var/app/gg.minion.Minion/.minion/minion-backups/`.
+/// Within each root it looks for `ESO-1` (live) and `ESO-2` (beta/PTS) subdirectories.
+///
+/// Returns at most one entry per game folder name, preferring the native path over Flatpak.
+pub fn detect_minion_backup_dirs() -> Vec<PathBuf> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+
+    // Collect candidate backup roots, preferring native over Flatpak.
+    let candidates: Vec<PathBuf> = vec![
+        home.join(MINION_BACKUP_SUBDIR),
+        // Always add the Flatpak path as a candidate; it simply won't exist for
+        // non-Flatpak users. This avoids needing runtime sandbox detection.
+        home.join(FLATPAK_MINION_BACKUP_SUBDIR),
+    ];
+
+    let mut found = Vec::new();
+    let mut seen_game_folders: HashSet<String> = HashSet::new();
+
+    for root in candidates {
+        if !root.is_dir() {
+            continue;
+        }
+        for game_folder in MINION_ESO_GAME_FOLDERS {
+            let key = game_folder.to_lowercase();
+            if !seen_game_folders.insert(key) {
+                continue;
+            }
+            let game_path = root.join(game_folder);
+            if game_path.is_dir() {
+                found.push(game_path);
+            }
+        }
+    }
+
+    found
 }

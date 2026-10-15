@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use eframe::egui::{self, Button, Color32, RichText, ScrollArea, Stroke, Visuals};
+use eframe::egui::{self, Button, Color32, RichText, ScrollArea, Stroke, Visuals, Window};
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
+use eso_addons_core::service::result::MinionBackupEntry;
 use lazy_async_promise::ImmediateValuePromise;
 use rfd::AsyncFileDialog;
 
@@ -24,8 +25,11 @@ pub struct Settings {
     addon_dir_dialog: PromisedValue<Option<String>>,
     clear_addons: Option<PromisedValue<()>>,
 
+    // Minion import: scan -> select -> import
     minion_dialog: PromisedValue<Option<String>>,
     minion_import: Option<PromisedValue<()>>,
+    minion_scan: Option<PromisedValue<Vec<MinionBackupEntry>>>,
+    minion_selected: Option<usize>,
 
     backup_dialog: PromisedValue<Option<String>>,
     backup_process: Option<PromisedValue<()>>,
@@ -71,23 +75,59 @@ impl Settings {
             }
         }
 
-        // poll minion file dialog
+        // poll minion scan (auto-discovery)
+        if let Some(minion_scan) = self.minion_scan.as_mut() {
+            minion_scan.poll_recording(service, "Scanning for Minion backups");
+            if minion_scan.is_ready() {
+                let entries = minion_scan.value.as_ref().cloned().unwrap_or_default();
+                if entries.is_empty() {
+                    // No backups found; fall back to manual file dialog.
+                    self.minion_scan = None;
+                    let promise = ImmediateValuePromise::new(async move {
+                        let dialog = AsyncFileDialog::new()
+                            .add_filter("zip", &["zip"])
+                            .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+                            .pick_file()
+                            .await;
+                        if let Some(path) = dialog {
+                            return Ok(Some(path.path().to_string_lossy().to_string()));
+                        }
+                        Ok(None::<String>)
+                    });
+                    self.minion_dialog.set(promise);
+                }
+                // If backups found, keep minion_scan so UI can show the selection list.
+            }
+        }
+
+        // poll minion file dialog (fallback or direct)
         self.minion_dialog
             .poll_recording(service, "Selecting Minion backup file");
         if self.minion_dialog.is_ready() {
             self.minion_dialog.handle();
             let value = self.minion_dialog.value.as_ref().unwrap();
             if let Some(path) = value {
-                let mut promise = PromisedValue::<()>::default();
-                promise.set(service.import_minion_file(Path::new(path)));
-                self.minion_import = Some(promise);
+                // If it's a zip file, use import_minion_backup; otherwise use the txt importer.
+                if path.to_lowercase().ends_with(".zip") {
+                    let mut promise = PromisedValue::<()>::default();
+                    promise.set(service.import_minion_backup(Path::new(path)));
+                    self.minion_import = Some(promise);
+                } else {
+                    let mut promise = PromisedValue::<()>::default();
+                    promise.set(service.import_minion_file(Path::new(path)));
+                    self.minion_import = Some(promise);
+                }
             }
+            // Clear the scan state since we're no longer using it.
+            self.minion_scan = None;
         }
 
         if let Some(minion_import) = self.minion_import.as_mut() {
             minion_import.poll_recording(service, "Importing Minion backup");
             if minion_import.is_ready() {
                 self.minion_import = None;
+                self.minion_scan = None;
+                self.minion_selected = None;
                 response.response_type = AddonResponseType::AddonsChanged;
             }
         }
@@ -319,36 +359,21 @@ impl View for Settings {
             ui.label(RichText::new("Import from Minion").heading());
             ui.add_space(5.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label("To import addons managed by minion, first create a new backup in minion. Locate the backup folder and select the file with a name like '*-addons.txt'.");
+                ui.label("To import addons managed by minion, first create a new backup in minion. Click the button below to auto-detect available backups, or manually select a backup file.");
             });
             // TODO: add wiki page to github repo with info on how to backup, how to find backup folder
             // ui.label("For additional help, check this link.");
             ui.add_space(5.0);
-            if self.minion_import.is_none() {
-                if self.minion_dialog.is_polling() {
-                    ui.add_enabled(
-                        false,
-                        Button::new(RichText::new("Import from Minion...").heading()),
-                    );
-                } else if ui
-                    .button(RichText::new("Import from Minion...").heading())
-                    .clicked()
-                {
-                    let promise = ImmediateValuePromise::new(async move {
-                        let dialog = AsyncFileDialog::new()
-                            .add_filter("text", &["txt"])
-                            .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
-                            .pick_file()
-                            .await;
-                        if let Some(path) = dialog {
-                            return Ok(Some(path.path().to_string_lossy().to_string()));
-                        }
-                        Ok(None::<String>)
-                    });
-                    self.minion_dialog.set(promise);
-                }
-            } else {
-                // disabled import progress
+
+            // Determine the current minion state
+            let importing = self.minion_import.is_some();
+            let scanning = self.minion_scan.as_ref().is_some_and(|s| s.is_polling());
+            let scan_ready = self.minion_scan.as_ref().is_some_and(|s| {
+                s.is_ready() && s.value.as_ref().is_some_and(|v| !v.is_empty())
+            });
+
+            if importing {
+                // Import in progress
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.add_enabled(
@@ -356,6 +381,96 @@ impl View for Settings {
                         egui::Button::new(RichText::new("Importing...").heading()),
                     );
                 });
+            } else if scanning {
+                // Scanning in progress
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.add_enabled(
+                        false,
+                        egui::Button::new(RichText::new("Scanning for backups...").heading()),
+                    );
+                });
+            } else if scan_ready {
+                // Show selection list in a window
+                let entries = self.minion_scan.as_ref().unwrap().value.as_ref().unwrap().clone();
+                Window::new("Minion Backups")
+                    .collapsible(false)
+                    .resizable(true)
+                    .default_size([400.0, 300.0])
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        ui.label(RichText::new("Select a backup to import:").strong());
+                        ui.separator();
+
+                        ScrollArea::vertical().show(ui, |ui| {
+                            for (i, entry) in entries.iter().enumerate() {
+                                let env_label = match entry.environment {
+                                    eso_addons_core::service::result::MinionEnvironment::Live => "Live",
+                                    eso_addons_core::service::result::MinionEnvironment::Beta => "PTS",
+                                };
+
+                                if ui
+                                    .selectable_value(&mut self.minion_selected, Some(i), format!("{} ({})", entry.label, env_label))
+                                    .clicked()
+                                {
+                                    // Selection changed; handled on Import button click
+                                }
+                            }
+                        });
+
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                self.minion_scan = None;
+                                self.minion_selected = None;
+                            }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Browse...").clicked() {
+                                    // Fallback: clear scan and open manual file dialog
+                                    self.minion_scan = None;
+                                    let promise = ImmediateValuePromise::new(async move {
+                                        let dialog = AsyncFileDialog::new()
+                                            .add_filter("zip", &["zip"])
+                                            .set_directory(env::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+                                            .pick_file()
+                                            .await;
+                                        if let Some(path) = dialog {
+                                            return Ok(Some(path.path().to_string_lossy().to_string()));
+                                        }
+                                        Ok(None::<String>)
+                                    });
+                                    self.minion_dialog.set(promise);
+                                }
+                                if ui.button("Import").clicked()
+                                    && let Some(idx) = self.minion_selected
+                                    && idx < entries.len()
+                                {
+                                    let path = entries[idx].path.clone();
+                                    let mut promise = PromisedValue::<()>::default();
+                                    promise.set(service.import_minion_backup(&path));
+                                    self.minion_import = Some(promise);
+                                    self.minion_scan = None;
+                                }
+                            });
+                        });
+                    });
+                // Disable the main button while the selection window is open
+                ui.add_enabled(false, Button::new(RichText::new("Import from Minion...").heading()));
+            } else if self.minion_dialog.is_polling() {
+                // Manual file dialog open
+                ui.add_enabled(
+                    false,
+                    Button::new(RichText::new("Import from Minion...").heading()),
+                );
+            } else if ui
+                .button(RichText::new("Import from Minion...").heading())
+                .clicked()
+            {
+                // Trigger auto-scan
+                let mut promise = PromisedValue::<Vec<MinionBackupEntry>>::default();
+                promise.set(service.scan_minion_backups());
+                self.minion_scan = Some(promise);
+                self.minion_selected = None;
             }
 
             ui.add_space(5.0);
