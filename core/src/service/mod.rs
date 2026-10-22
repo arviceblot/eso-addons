@@ -3428,3 +3428,163 @@ where i.addon_id is null
     info!("Done getting addons!");
     Ok(results)
 }
+
+#[cfg(test)]
+mod addon_folder_tests {
+    use super::*;
+    use lazy_async_promise::ImmediateValueState;
+    use std::time::Duration;
+
+    /// Create an AddonService with an in-memory SQLite database for testing.
+    async fn new_test_service() -> AddonService {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        migration::Migrator::up(&db, None).await.unwrap();
+
+        AddonService {
+            api: ApiClient::default(),
+            config: Config::default(),
+            db,
+            errors: Arc::new(Mutex::new(Vec::new())),
+            git_available: false,
+        }
+    }
+
+    /// Helper to resolve an ImmediateValuePromise by sleeping briefly and polling.
+    /// Returns `Some(value)` on success, `None` if the promise errored.
+    async fn resolve_promise<T: Send + Clone + 'static>(
+        promise: &mut ImmediateValuePromise<T>,
+    ) -> Option<T> {
+        // Poll in a loop to give the spawned task time to complete
+        for _ in 0..20 {
+            let state = promise.poll_state();
+            match &state {
+                ImmediateValueState::Success(v) => return Some(v.clone()),
+                ImmediateValueState::Error(_) => return None,
+                ImmediateValueState::Empty | ImmediateValueState::Updating => {}
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn test_init_default_folder_seeds_once() {
+        let service = new_test_service().await;
+
+        // new() already calls init_default_folder(), so there should be exactly 1 folder
+        let folders = AddonFolders::Entity::find().all(&service.db).await.unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].label, "Live");
+        assert_eq!(folders[0].is_default, 1);
+
+        // Calling init_default_folder again should be a no-op
+        service.init_default_folder().await.unwrap();
+        let folders = AddonFolders::Entity::find().all(&service.db).await.unwrap();
+        assert_eq!(folders.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_addon_folders() {
+        let service = new_test_service().await;
+
+        let mut promise = service.get_addon_folders();
+        let folders = resolve_promise(&mut promise).await.expect("should succeed");
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].label, "Live");
+    }
+
+    #[tokio::test]
+    async fn test_add_addon_folder() {
+        let service = new_test_service().await;
+
+        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let id = resolve_promise(&mut promise).await.expect("should succeed");
+        assert_eq!(id, 2);
+
+        let mut promise = service.get_addon_folders();
+        let folders = resolve_promise(&mut promise).await.expect("should succeed");
+        assert_eq!(folders.len(), 2);
+        assert_eq!(folders[1].label, "PTS");
+        assert_eq!(folders[1].is_default, 0);
+    }
+
+    #[tokio::test]
+    async fn test_set_default_addon_folder() {
+        let service = new_test_service().await;
+
+        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let new_id = resolve_promise(&mut promise).await.expect("should succeed");
+
+        // Set PTS as default
+        {
+            let mut svc = service.clone();
+            let mut promise = svc.set_default_addon_folder(new_id);
+            resolve_promise(&mut promise).await.expect("should succeed");
+        }
+
+        let mut promise = service.get_addon_folders();
+        let folders = resolve_promise(&mut promise).await.expect("should succeed");
+        assert_eq!(folders[0].is_default, 0);
+        assert_eq!(folders[1].is_default, 1);
+    }
+
+    #[tokio::test]
+    async fn test_remove_addon_folder_success() {
+        let service = new_test_service().await;
+
+        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let new_id = resolve_promise(&mut promise).await.expect("should succeed");
+
+        {
+            let mut svc = service.clone();
+            let mut promise = svc.remove_addon_folder(new_id);
+            resolve_promise(&mut promise).await.expect("should succeed");
+        }
+
+        let mut promise = service.get_addon_folders();
+        let folders = resolve_promise(&mut promise).await.expect("should succeed");
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].label, "Live");
+    }
+
+    #[tokio::test]
+    async fn test_remove_addon_folder_default_rejected() {
+        let service = new_test_service().await;
+
+        let default_id = service.get_active_folder_id().await.unwrap();
+
+        let mut svc = service.clone();
+        let mut promise = svc.remove_addon_folder(default_id);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let state = promise.poll_state();
+        assert!(
+            matches!(&state, ImmediateValueState::Error(e) if e
+                .downcast_ref::<error::Error>()
+                .map(|e| matches!(e, error::Error::AddonFolderIsDefault { .. }))
+                .unwrap_or(false)),
+            "expected AddonFolderIsDefault error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_active_folder_id_default() {
+        let service = new_test_service().await;
+
+        // No active folder set, should fall back to DB default
+        let id = service.get_active_folder_id().await.unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_active_folder_id_config_override() {
+        let mut service = new_test_service().await;
+
+        // Add a second folder and set it as active via config
+        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let new_id = resolve_promise(&mut promise).await.expect("should succeed");
+        service.config.active_addon_folder_id = Some(new_id);
+
+        let id = service.get_active_folder_id().await.unwrap();
+        assert_eq!(id, new_id);
+    }
+}
