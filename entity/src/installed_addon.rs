@@ -9,6 +9,7 @@ pub struct Model {
     pub addon_id: i64,
     pub version: String,
     pub date: String,
+    pub addon_folder_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

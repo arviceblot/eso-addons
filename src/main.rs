@@ -2,6 +2,7 @@
 
 use dotenv::dotenv;
 use eframe::egui::{self, RichText, Visuals, vec2};
+use entity::addon_folders;
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
 use eso_addons_core::service::result::{
@@ -11,6 +12,7 @@ use eso_addons_core::service::result::{
 use lazy_async_promise::{ImmediateValuePromise, ImmediateValueState};
 use std::collections::HashMap;
 use std::io;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::log::info;
@@ -119,6 +121,15 @@ struct EamApp {
     /// Report once the GUI is up and exit; set by ESO_ADDONS_SMOKE_TEST.
     smoke_test: bool,
     smoke_reported: bool,
+    /// Addon folder management
+    addon_folders: PromisedValue<Vec<addon_folders::Model>>,
+    add_folder_dialog: PromisedValue<Option<String>>,
+    add_folder_label: String,
+    add_folder_result: PromisedValue<i64>,
+    set_default_folder: PromisedValue<()>,
+    remove_folder: PromisedValue<()>,
+    remove_folder_error: Option<String>,
+    folder_to_remove: Option<i64>,
 }
 
 impl EamApp {
@@ -176,6 +187,14 @@ impl EamApp {
             had_missing_deps: false,
             smoke_test: std::env::var_os("ESO_ADDONS_SMOKE_TEST").is_some(),
             smoke_reported: false,
+            addon_folders: PromisedValue::default(),
+            add_folder_dialog: PromisedValue::default(),
+            add_folder_label: String::new(),
+            add_folder_result: PromisedValue::default(),
+            set_default_folder: PromisedValue::default(),
+            remove_folder: PromisedValue::default(),
+            remove_folder_error: None,
+            folder_to_remove: None,
         };
         if app.service.config.update_on_launch {
             // check for update on init
@@ -431,6 +450,55 @@ impl EamApp {
         if addons_changed {
             self.handle_addons_changed();
         }
+
+        // Poll addon folder list
+        if self.addon_folders.value.is_none() && !self.addon_folders.is_polling() {
+            self.addon_folders.set(self.service.get_addon_folders());
+        }
+        self.addon_folders
+            .poll_recording(&self.service, "Loading addon folders");
+        if self.addon_folders.is_ready() {
+            self.addon_folders.handle();
+        }
+
+        // Poll add folder dialog
+        self.add_folder_dialog
+            .poll_recording(&self.service, "Selecting addon folder");
+        if self.add_folder_dialog.is_ready() {
+            self.add_folder_dialog.handle();
+            if let Some(path) = self.add_folder_dialog.value.as_ref().unwrap() {
+                let label = self.add_folder_label.clone();
+                self.add_folder_result
+                    .set(self.service.add_addon_folder(label, PathBuf::from(path)));
+            }
+        }
+
+        // Poll add folder result
+        self.add_folder_result
+            .poll_recording(&self.service, "Adding addon folder");
+        if self.add_folder_result.is_ready() {
+            self.add_folder_result.handle();
+            self.addon_folders.set(self.service.get_addon_folders());
+            self.handle_addons_changed();
+        }
+
+        // Poll set default folder
+        self.set_default_folder
+            .poll_recording(&self.service, "Setting default addon folder");
+        if self.set_default_folder.is_ready() {
+            self.set_default_folder.handle();
+            self.addon_folders.set(self.service.get_addon_folders());
+            self.handle_addons_changed();
+        }
+
+        // Poll remove folder
+        self.remove_folder
+            .poll_recording(&self.service, "Removing addon folder");
+        if self.remove_folder.is_ready() {
+            self.remove_folder.handle();
+            self.addon_folders.set(self.service.get_addon_folders());
+            self.handle_addons_changed();
+        }
     }
 
     // region: View Management
@@ -631,6 +699,122 @@ impl eframe::App for EamApp {
                 ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                     ui.add_space(5.0);
                     ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+
+                    // Addon folder selector
+                    if let Some(folders) = self.addon_folders.value.as_ref()
+                        && !folders.is_empty()
+                    {
+                        ui.add_space(5.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("📁 Folder").strong());
+                        });
+
+                        // Determine active folder
+                        let active_folder_id = self.service.config.active_addon_folder_id;
+                        let default_folder = folders.iter().find(|f| f.is_default == 1);
+                        let active = if let Some(id) = active_folder_id {
+                            folders.iter().find(|f| f.id == id)
+                        } else {
+                            default_folder
+                        };
+
+                        if let Some(current) = active {
+                            let display_label = if current.is_default == 1 {
+                                format!("{}/{}", current.label, "Default")
+                            } else {
+                                current.label.clone()
+                            };
+
+                            let mut clicked_folder_id: Option<i64> = None;
+                            egui::ComboBox::from_id_salt("addon_folder_combo")
+                                .selected_text(display_label)
+                                .show_ui(ui, |ui| {
+                                    for folder in folders {
+                                        let folder_label = if folder.is_default == 1 {
+                                            format!("{} (Default)", folder.label)
+                                        } else {
+                                            folder.label.clone()
+                                        };
+                                        let is_active = if let Some(id) = active_folder_id {
+                                            id == folder.id
+                                        } else {
+                                            folder.is_default == 1
+                                        };
+                                        let mut dummy = is_active;
+                                        if ui
+                                            .selectable_value(&mut dummy, is_active, folder_label)
+                                            .clicked()
+                                        {
+                                            clicked_folder_id = Some(folder.id);
+                                        }
+                                    }
+                                });
+
+                            // Handle folder selection outside closure to avoid borrow conflicts
+                            if let Some(clicked_id) = clicked_folder_id {
+                                self.set_default_folder
+                                    .set(self.service.set_default_addon_folder(clicked_id));
+                            }
+
+                            // Remove folder button (only for non-default folders)
+                            if current.is_default != 1 {
+                                ui.add_space(3.0);
+                                if ui
+                                    .small_button(RichText::new("🗑 Remove Folder").small())
+                                    .clicked()
+                                {
+                                    self.remove_folder_error = None;
+                                    self.folder_to_remove = Some(current.id);
+                                    self.remove_folder
+                                        .set(self.service.remove_addon_folder(current.id));
+                                }
+                                if let Some(ref err) = self.remove_folder_error {
+                                    ui.label(
+                                        RichText::new(err.clone())
+                                            .color(egui::Color32::RED)
+                                            .small(),
+                                    );
+                                }
+                            }
+
+                            // Add folder button
+                            ui.add_space(3.0);
+                            if ui.small_button("➕ Add Folder").clicked() {
+                                self.remove_folder_error = None;
+                                let current_dir = self.service.config.addon_dir.clone();
+                                let suggested = if let Some(path_str) = current_dir.to_str() {
+                                    if path_str.contains("/live/") || path_str.contains("\\live\\")
+                                    {
+                                        let mut pts = path_str.replace("/live/", "/pts/");
+                                        pts = pts.replace("\\live\\", "\\pts\\");
+                                        Some(pts)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                let promise = ImmediateValuePromise::new(async move {
+                                    let dialog = rfd::AsyncFileDialog::new()
+                                        .set_title("Select addon folder");
+                                    let dialog = if let Some(suggested) = suggested {
+                                        dialog.set_directory(&suggested)
+                                    } else {
+                                        dialog
+                                    };
+                                    let result = dialog.pick_folder().await;
+                                    if let Some(path) = result {
+                                        Ok(Some(path.path().to_string_lossy().to_string()))
+                                    } else {
+                                        Ok(None::<String>)
+                                    }
+                                });
+                                self.add_folder_dialog.set(promise);
+                            }
+                        }
+                    }
+
+                    ui.separator();
 
                     ui.selectable_value(
                         &mut self.view,

@@ -159,6 +159,12 @@ pub enum Error {
         name: String,
         path: PathBuf,
     },
+
+    #[snafu(display("Cannot remove default addon folder '{}'", label))]
+    AddonFolderIsDefault { label: String },
+
+    #[snafu(display("Cannot remove addon folder: it still has associated addons"))]
+    AddonFolderHasAddons,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

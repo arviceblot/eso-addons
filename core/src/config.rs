@@ -145,6 +145,10 @@ pub struct Config {
     pub ttc_region: TTCRegion,
     #[serde(default = "default_1")]
     pub pixels_per_point: f32,
+    /// ID of the currently active addon folder.
+    /// When `None`, falls back to the folder where `is_default = 1` in the DB.
+    #[serde(default)]
+    pub active_addon_folder_id: Option<i64>,
 }
 impl Config {
     pub fn load() -> Config {

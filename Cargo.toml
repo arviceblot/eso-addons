@@ -39,6 +39,7 @@ eframe = { version = "0.36.2", default-features = false, features = [
 tokio = { version = "1.52.3", features = ["full"] }
 bbcode-egui = { path = "./bbcode-egui", version = "0.1", features = ["entities"] }
 eso-addons-core = { version = "0.1.2", path = "./core" }
+entity = { path = "./entity" }
 strum = "0.28.0"
 strum_macros = "0.28.0"
 lazy_async_promise = "0.6.0"

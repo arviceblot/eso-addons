@@ -18,6 +18,7 @@ use entity::addon as DbAddon;
 use entity::addon_dependency as AddonDep;
 use entity::addon_detail as AddonDetail;
 use entity::addon_dir as AddonDir;
+use entity::addon_folders as AddonFolders;
 use entity::addon_image as AddonImage;
 use entity::category as Category;
 use entity::category_parent as CategoryParent;
@@ -112,13 +113,20 @@ impl AddonService {
         let db = sea_orm::Database::connect(opt).await.unwrap();
         Migrator::up(&db, None).await.unwrap();
 
-        Self {
+        let service = Self {
             api: client,
             config,
             db,
             errors: Arc::new(Mutex::new(Vec::new())),
             git_available: git::is_available(),
+        };
+
+        // Ensure addon_folders table is seeded (no-op if migration already handled it)
+        if let Err(e) = service.init_default_folder().await {
+            warn!("Failed to init default addon folder: {e}");
         }
+
+        service
     }
 
     pub fn record_error(&self, context: impl Into<String>, message: impl ToString) {
@@ -198,6 +206,7 @@ impl AddonService {
             addon_id: ActiveValue::Set(addon_id),
             version: ActiveValue::Set(entry.version.to_string()),
             date: ActiveValue::Set(entry.date.to_string()),
+            addon_folder_id: ActiveValue::Set(None),
         };
 
         let result = InstalledAddon::Entity::insert(installed_entry)
@@ -240,7 +249,9 @@ impl AddonService {
 
     pub async fn upgrade(&mut self) -> Result<UpdateResult> {
         // update all addons that have a newer date than installed date
+        let folder_id = self.get_active_folder_id().await;
         let updates = InstalledAddon::Entity::find()
+            .filter(InstalledAddon::Column::AddonFolderId.eq(folder_id))
             .columns([
                 DbAddon::Column::Id,
                 DbAddon::Column::CategoryId,
@@ -602,8 +613,16 @@ impl AddonService {
                 .exec(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
+            // resolve the active addon folder path
+            let addon_dir = match service.get_active_addon_dir().await {
+                Ok(d) => d,
+                Err(e) => {
+                    warn!("Failed to get active addon dir: {e}");
+                    return Ok(());
+                }
+            };
             // delete installed addon directories
-            match fs_delete_addon(&service.get_addon_dir(), &installed_dirs) {
+            match fs_delete_addon(&addon_dir, &installed_dirs) {
                 Ok(_) => {
                     info!("Removed addon {}", addon.name);
                 }
@@ -650,7 +669,9 @@ impl AddonService {
     }
 
     pub async fn get_installed_addon_count(&self) -> Result<u64> {
+        let folder_id = self.get_active_folder_id().await;
         let count = InstalledAddon::Entity::find()
+            .filter(InstalledAddon::Column::AddonFolderId.eq(folder_id))
             .count(&self.db)
             .await
             .context(error::DbGetSnafu)?;
@@ -658,23 +679,25 @@ impl AddonService {
     }
 
     pub fn get_installed_addons(&self) -> ImmediateValuePromise<Vec<AddonShowDetails>> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
-            fetch_installed_esoui_addons(&db, &addon_dir)
+            let addon_dir = service.get_active_addon_dir().await?;
+            fetch_installed_esoui_addons(&service.db, &addon_dir)
                 .await
                 .map_err(Into::into)
         })
     }
 
     pub fn get_missing_dependency_options(&self) -> ImmediateValuePromise<Vec<AddonDepOption>> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
 
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
             info!("Checking for missing dependencies");
 
             // 1. ESOUI dependencies (existing SQL query)
+            let folder_id = service.get_active_folder_id().await;
+            let folder_param = folder_id.unwrap_or(-1);
             let mut results = AddonDepOption::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 r#"select
@@ -690,12 +713,14 @@ impl AddonService {
             inner join addon_dependency adp on i.addon_id = adp.addon_id
             inner join addon a on i.addon_id = a.id
         where
-            adp.dependency_dir not in (
+            i.addon_folder_id = ?
+            and adp.dependency_dir not in (
                 SELECT
                     DISTINCT ad.dir
                 FROM
                     installed_addon i2
                     inner join addon_dir ad on i2.addon_id = ad.addon_id
+                where i2.addon_folder_id = ?
             )
         group by
             adp.dependency_dir
@@ -715,9 +740,12 @@ impl AddonService {
             coalesce(dc.dir_count, 999) asc,
             cast(coalesce(nullif(a.download_monthly, ''), '0') as integer) desc,
             cast(coalesce(nullif(a.date, ''), '0') as integer) desc"#,
-                [],
+                [
+                    sea_orm::Value::BigInt(Some(folder_param)),
+                    sea_orm::Value::BigInt(Some(folder_param)),
+                ],
             ))
-            .all(&db)
+            .all(&service.db)
             .await
             .context(error::DbGetSnafu)?;
 
@@ -728,11 +756,12 @@ impl AddonService {
 
             // Check git addon dependencies
             let git_addons = GitAddon::Entity::find()
-                .all(&db)
+                .filter(GitAddon::Column::AddonFolderId.eq(folder_id))
+                .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
             check_non_esoui_deps(
-                &db,
+                &service.db,
                 &addon_dir,
                 &git_addons,
                 |ga| (&ga.directory, &ga.directory),
@@ -744,11 +773,12 @@ impl AddonService {
 
             // Check local addon dependencies
             let local_addons = LocalAddon::Entity::find()
-                .all(&db)
+                .filter(LocalAddon::Column::AddonFolderId.eq(folder_id))
+                .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
             check_non_esoui_deps(
-                &db,
+                &service.db,
                 &addon_dir,
                 &local_addons,
                 |la| (&la.directory, &la.title),
@@ -1091,6 +1121,188 @@ impl AddonService {
         self.config.addon_dir.clone()
     }
 
+    // --- Addon folder management --------------------------------------------------------
+    // region: addon_folders
+
+    /// On startup, ensure the `addon_folders` table is seeded.
+    /// If empty, insert a "Live" folder from `Config.addon_dir`.
+    pub async fn init_default_folder(&self) -> Result<()> {
+        let count = AddonFolders::Entity::find()
+            .count(&self.db)
+            .await
+            .context(error::DbGetSnafu)?;
+        if count == 0 {
+            let path = self.config.addon_dir.to_string_lossy().to_string();
+            AddonFolders::Entity::insert(AddonFolders::ActiveModel {
+                id: ActiveValue::NotSet,
+                label: ActiveValue::Set("Live".to_string()),
+                path: ActiveValue::Set(path),
+                is_default: ActiveValue::Set(1),
+                created_at: ActiveValue::Set("CURRENT_TIMESTAMP".to_string()),
+            })
+            .exec(&self.db)
+            .await
+            .context(error::DbPutSnafu)?;
+            info!("Seeded default addon folder from config.addon_dir");
+        }
+        Ok(())
+    }
+
+    /// Resolve the active addon folder path.
+    /// Priority: config.active_addon_folder_id > DB row with is_default=1 > config.addon_dir.
+    pub async fn get_active_addon_dir(&self) -> Result<PathBuf> {
+        if let Some(folder_id) = self.get_active_folder_id().await
+            && let Ok(Some(folder)) = AddonFolders::Entity::find_by_id(folder_id)
+                .one(&self.db)
+                .await
+        {
+            return Ok(PathBuf::from(folder.path));
+        }
+
+        // Ultimate fallback: config path
+        Ok(self.config.addon_dir.clone())
+    }
+
+    /// Resolve the active addon folder ID.
+    /// Priority: config.active_addon_folder_id > DB row with is_default=1 > None.
+    async fn get_active_folder_id(&self) -> Option<i64> {
+        // Try config reference first
+        if let Some(id) = self.config.active_addon_folder_id
+            && AddonFolders::Entity::find_by_id(id)
+                .one(&self.db)
+                .await
+                .is_ok_and(|m| m.is_some())
+        {
+            return Some(id);
+        }
+
+        // Fall back to DB default
+        AddonFolders::Entity::find()
+            .filter(AddonFolders::Column::IsDefault.eq(1))
+            .one(&self.db)
+            .await
+            .ok()
+            .flatten()
+            .map(|f| f.id)
+    }
+
+    /// List all registered addon folders.
+    pub fn get_addon_folders(&self) -> ImmediateValuePromise<Vec<AddonFolders::Model>> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let folders = AddonFolders::Entity::find()
+                .order_by_asc(AddonFolders::Column::Id)
+                .all(&db)
+                .await
+                .context(error::DbGetSnafu)?;
+            Ok(folders)
+        })
+    }
+
+    /// Add a new addon folder.
+    pub fn add_addon_folder(&self, label: String, path: PathBuf) -> ImmediateValuePromise<i64> {
+        let db = self.db.clone();
+        ImmediateValuePromise::new(async move {
+            let path_str = path.to_string_lossy().to_string();
+            let active = AddonFolders::ActiveModel {
+                id: ActiveValue::NotSet,
+                label: ActiveValue::Set(label),
+                path: ActiveValue::Set(path_str),
+                is_default: ActiveValue::Set(0),
+                created_at: ActiveValue::Set("CURRENT_TIMESTAMP".to_string()),
+            };
+            let result = active.insert(&db).await.context(error::DbPutSnafu)?;
+            Ok(result.id)
+        })
+    }
+
+    /// Set the default addon folder by ID.
+    pub fn set_default_addon_folder(&mut self, id: i64) -> ImmediateValuePromise<()> {
+        let mut service = self.clone();
+        ImmediateValuePromise::new(async move {
+            AddonFolders::Entity::find_by_id(id)
+                .one(&service.db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id })?;
+
+            AddonFolders::Entity::update_many()
+                .col_expr(
+                    AddonFolders::Column::IsDefault,
+                    Expr::value(Value::Int(Some(0))),
+                )
+                .exec(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
+
+            AddonFolders::Entity::update(AddonFolders::ActiveModel {
+                id: ActiveValue::Set(id),
+                is_default: ActiveValue::Set(1),
+                ..Default::default()
+            })
+            .exec(&service.db)
+            .await
+            .context(error::DbPutSnafu)?;
+
+            service.config.active_addon_folder_id = Some(id);
+            service.save_config();
+
+            Ok(())
+        })
+    }
+
+    /// Remove an addon folder. Fails if it's the default or has associated addons.
+    pub fn remove_addon_folder(&mut self, id: i64) -> ImmediateValuePromise<()> {
+        let mut service = self.clone();
+        ImmediateValuePromise::new(async move {
+            let folder = AddonFolders::Entity::find_by_id(id)
+                .one(&service.db)
+                .await
+                .context(error::DbGetSnafu)?
+                .context(error::AddonNotFoundSnafu { id })?;
+
+            if folder.is_default == 1 {
+                Err(error::Error::AddonFolderIsDefault {
+                    label: folder.label.clone(),
+                })?;
+            }
+
+            let local_count = LocalAddon::Entity::find()
+                .filter(LocalAddon::Column::AddonFolderId.eq(Some(id)))
+                .count(&service.db)
+                .await
+                .context(error::DbGetSnafu)?;
+
+            let git_count = GitAddon::Entity::find()
+                .filter(GitAddon::Column::AddonFolderId.eq(Some(id)))
+                .count(&service.db)
+                .await
+                .context(error::DbGetSnafu)?;
+
+            let installed_count = InstalledAddon::Entity::find()
+                .filter(InstalledAddon::Column::AddonFolderId.eq(Some(id)))
+                .count(&service.db)
+                .await
+                .context(error::DbGetSnafu)?;
+
+            if local_count + git_count + installed_count > 0 {
+                Err(error::Error::AddonFolderHasAddons)?;
+            }
+
+            folder
+                .delete(&service.db)
+                .await
+                .context(error::DbDeleteSnafu)?;
+
+            if service.config.active_addon_folder_id == Some(id) {
+                service.config.active_addon_folder_id = None;
+                service.save_config();
+            }
+
+            Ok(())
+        })
+    }
+
     // endregion
 
     async fn base_fs_download_extract(
@@ -1099,6 +1311,7 @@ impl AddonService {
         path_addr: Option<&str>,
         md5: Option<String>,
     ) -> Result<ZipArchive<File>> {
+        let addon_dir = self.get_active_addon_dir().await?;
         let response = self
             .api
             .download_file(url)
@@ -1156,7 +1369,7 @@ impl AddonService {
                 .context(error::AddonDownloadZipReadSnafu { file: i })?;
             let outpath = match file.enclosed_name() {
                 Some(path) => {
-                    let mut p = self.get_addon_dir().clone();
+                    let mut p = addon_dir.clone();
                     if let Some(x) = path_addr {
                         // append additional path if defined
                         p.push(x);
@@ -1192,7 +1405,7 @@ impl AddonService {
 
     async fn fs_download_addon(&self, url: &str, md5: Option<String>) -> Result<Addon> {
         let mut archive = self.base_fs_download_extract(url, None, md5).await?;
-        let mut addon_path = self.get_addon_dir();
+        let mut addon_path = self.get_active_addon_dir().await?;
         let addon_name = archive
             .by_index(0)
             .context(error::AddonDownloadZipReadSnafu { file: 0_usize })?;
@@ -1644,9 +1857,23 @@ impl AddonService {
         let service = self.clone();
         ImmediateValuePromise::new(async move {
             info!("Pulling Git repositories");
-            tokio::task::spawn_blocking(move || service.p_pull_git_repositories()).await?;
+            // Gather all addon folder paths before entering blocking context
+            let folder_paths = service.get_all_folder_paths().await;
+            tokio::task::spawn_blocking(move || service.p_pull_git_repositories(&folder_paths))
+                .await?;
             Ok(())
         })
+    }
+
+    /// Retrieve all registered addon folder paths for blocking-thread use.
+    async fn get_all_folder_paths(&self) -> Vec<PathBuf> {
+        AddonFolders::Entity::find()
+            .all(&self.db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| PathBuf::from(f.path))
+            .collect()
     }
 
     fn p_find_git_repositories(&self, addon_dir: &Path) -> Vec<PathBuf> {
@@ -1700,11 +1927,13 @@ impl AddonService {
         repositories
     }
 
-    fn p_pull_git_repositories(&self) {
-        let repositories = self.p_find_git_repositories(&self.get_addon_dir());
-        for path in repositories {
-            if let Err(error) = git::pull_repository(&path) {
-                self.record_error(format!("Pulling Git repository {}", path.display()), error);
+    fn p_pull_git_repositories(&self, folder_paths: &[PathBuf]) {
+        for folder_path in folder_paths {
+            let repositories = self.p_find_git_repositories(folder_path);
+            for path in repositories {
+                if let Err(error) = git::pull_repository(&path) {
+                    self.record_error(format!("Pulling Git repository {}", path.display()), error);
+                }
             }
         }
         info!("Done pulling Git repositories!");
@@ -1715,15 +1944,31 @@ impl AddonService {
     /// Scan the AddOns directory for locally installed (non-ESOUI, non-git) addons.
     /// Upserts findings into the `local_addon` and `installed_local_addon` tables.
     pub fn scan_local_addons(&self) -> ImmediateValuePromise<Vec<LocalAddonResult>> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
-        let git_repos = self.p_find_git_repositories(&addon_dir);
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+
+            let git_repos = {
+                let db_clone = service.db.clone();
+                let addon_dir_clone = addon_dir.clone();
+                tokio::task::spawn_blocking(move || {
+                    let service = AddonService {
+                        db: db_clone,
+                        ..Default::default()
+                    };
+                    service.p_find_git_repositories(&addon_dir_clone)
+                })
+                .await
+                .unwrap_or_default()
+            };
+
             info!("Scanning for local addons");
 
-            // Get directories already tracked as local addons
+            // Get directories already tracked as local addons (for active folder only)
+            let folder_id = service.get_active_folder_id().await;
             let existing: Vec<LocalAddon::Model> = LocalAddon::Entity::find()
-                .all(&db)
+                .filter(LocalAddon::Column::AddonFolderId.eq(folder_id))
+                .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
             let existing_map: HashMap<String, i64> = existing
@@ -1743,7 +1988,7 @@ impl AddonService {
                     "SELECT dir, addon_id FROM addon_dir",
                     [],
                 ))
-                .all(&db)
+                .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
             let esoui_match: HashMap<String, i64> = addon_dir_rows
@@ -1762,10 +2007,10 @@ impl AddonService {
                     DbBackend::Sqlite,
                     "SELECT d.dir FROM addon_dir d \
                      INNER JOIN installed_addon i ON d.addon_id = i.addon_id \
-                     WHERE d.dir != ''",
-                    [],
+                     WHERE d.dir != '' AND i.addon_folder_id = ?",
+                    [sea_orm::Value::BigInt(folder_id)],
                 ))
-                .all(&db)
+                .all(&service.db)
                 .await
                 .context(error::DbGetSnafu)?;
             let installed_dir_names: HashSet<String> =
@@ -1853,8 +2098,13 @@ impl AddonService {
                         version: ActiveValue::Set(version.clone()),
                         add_on_version: ActiveValue::Set(add_on_version),
                         description: ActiveValue::Set(description.clone()),
+                        addon_folder_id: ActiveValue::Set(folder_id),
                     };
-                    active.insert(&db).await.context(error::DbPutSnafu)?.id
+                    active
+                        .insert(&service.db)
+                        .await
+                        .context(error::DbPutSnafu)?
+                        .id
                 };
 
                 // Insert/update installed_local_addon via upsert
@@ -1871,7 +2121,7 @@ impl AddonService {
                         ])
                         .to_owned(),
                 )
-                .exec(&db)
+                .exec(&service.db)
                 .await;
 
                 results.push(LocalAddonResult {
@@ -1897,13 +2147,14 @@ impl AddonService {
 
     /// Scan git repositories in the AddOns directory and upsert metadata.
     pub fn scan_git_addons(&self) -> ImmediateValuePromise<Vec<GitAddonResult>> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+            let folder_id = service.get_active_folder_id().await;
             info!("Scanning Git addon repositories");
 
             let repositories = {
-                let db_clone = db.clone();
+                let db_clone = service.db.clone();
                 let addon_dir_clone = addon_dir.clone();
                 tokio::task::spawn_blocking(move || {
                     let service = AddonService {
@@ -1930,7 +2181,7 @@ impl AddonService {
                 // Upsert git_repo
                 let existing_repo = GitRepo::Entity::find()
                     .filter(GitRepo::Column::Url.eq(url.clone()))
-                    .one(&db)
+                    .one(&service.db)
                     .await
                     .context(error::DbGetSnafu)?;
 
@@ -1951,7 +2202,11 @@ impl AddonService {
                         last_updated: ActiveValue::Set(Some(now.clone())),
                         created_at: ActiveValue::Set(now),
                     };
-                    active.insert(&db).await.context(error::DbPutSnafu)?.id
+                    active
+                        .insert(&service.db)
+                        .await
+                        .context(error::DbPutSnafu)?
+                        .id
                 };
 
                 // Determine addon directories within the repo
@@ -2024,7 +2279,7 @@ impl AddonService {
                     let existing_addon = GitAddon::Entity::find()
                         .filter(GitAddon::Column::GitRepoId.eq(repo_id))
                         .filter(GitAddon::Column::Directory.eq(dir_name.clone()))
-                        .one(&db)
+                        .one(&service.db)
                         .await
                         .context(error::DbGetSnafu)?;
 
@@ -2042,8 +2297,13 @@ impl AddonService {
                             description: ActiveValue::Set(description.clone()),
                             remote_version: ActiveValue::Set(version.clone()),
                             remote_add_on_version: ActiveValue::Set(add_on_version),
+                            addon_folder_id: ActiveValue::Set(folder_id),
                         };
-                        active.insert(&db).await.context(error::DbPutSnafu)?.id
+                        active
+                            .insert(&service.db)
+                            .await
+                            .context(error::DbPutSnafu)?
+                            .id
                     };
 
                     // Insert/update installed_git_addon via upsert
@@ -2060,7 +2320,7 @@ impl AddonService {
                             ])
                             .to_owned(),
                     )
-                    .exec(&db)
+                    .exec(&service.db)
                     .await;
 
                     results.push(GitAddonResult {
@@ -2095,19 +2355,20 @@ impl AddonService {
 
     /// Get all installed addons from all sources (ESOUI, Git, Local).
     pub fn get_all_installed_addons(&self) -> ImmediateValuePromise<Vec<InstalledAddonDetails>> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+            let folder_id = service.get_active_folder_id().await;
             let mut all = Vec::new();
 
             // 1. ESOUI addons (reuse the existing logic)
-            let esoui_addons = fetch_installed_esoui_addons(&db, &addon_dir).await?;
+            let esoui_addons = fetch_installed_esoui_addons(&service.db, &addon_dir).await?;
             for addon in esoui_addons {
                 all.push(InstalledAddonDetails::from_esoui(addon));
             }
 
             // 2. Local addons
-            let local_addons = fetch_local_addons(&db).await?;
+            let local_addons = fetch_local_addons(&service.db, folder_id).await?;
             for addon in local_addons {
                 let version = addon.version.clone().unwrap_or_default();
                 let installed = addon.installed_version.clone();
@@ -2132,7 +2393,7 @@ impl AddonService {
             }
 
             // 3. Git addons
-            let git_addons = fetch_git_addons(&db).await?;
+            let git_addons = fetch_git_addons(&service.db, folder_id).await?;
             for addon in git_addons {
                 let version = addon.version.clone().unwrap_or_default();
                 let installed = addon.installed_version.clone();
@@ -2166,7 +2427,7 @@ impl AddonService {
     /// Get all installed addon directory names across all sources (ESOUI, Git, Local).
     /// Used for resolving manifest-based dependencies.
     pub fn get_installed_addon_directories(&self) -> ImmediateValuePromise<HashSet<String>> {
-        let db = self.db.clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
             use sea_orm::Statement;
 
@@ -2175,15 +2436,19 @@ impl AddonService {
                 directory: String,
             }
 
+            let folder_id = service.get_active_folder_id().await;
+            let folder_param = folder_id.unwrap_or(-1);
+
             // ESOUI: from addon_dir joined with installed_addon
             let esoui_dirs = DirRow::find_by_statement(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
                 r#"SELECT d.dir as directory
                    FROM addon_dir d
-                   INNER JOIN installed_addon i ON i.addon_id = d.addon_id"#,
-                [],
+                   INNER JOIN installed_addon i ON i.addon_id = d.addon_id
+                   WHERE i.addon_folder_id = ?"#,
+                [sea_orm::Value::BigInt(Some(folder_param))],
             ))
-            .all(&db)
+            .all(&service.db)
             .await
             .context(error::DbGetSnafu)?;
 
@@ -2192,10 +2457,11 @@ impl AddonService {
                 DbBackend::Sqlite,
                 r#"SELECT la.directory as directory
                    FROM local_addon la
-                   INNER JOIN installed_local_addon il ON il.local_addon_id = la.id"#,
-                [],
+                   INNER JOIN installed_local_addon il ON il.local_addon_id = la.id
+                   WHERE la.addon_folder_id = ?"#,
+                [sea_orm::Value::BigInt(Some(folder_param))],
             ))
-            .all(&db)
+            .all(&service.db)
             .await
             .context(error::DbGetSnafu)?;
 
@@ -2204,10 +2470,11 @@ impl AddonService {
                 DbBackend::Sqlite,
                 r#"SELECT ga.directory as directory
                    FROM git_addon ga
-                   INNER JOIN installed_git_addon ig ON ig.git_addon_id = ga.id"#,
-                [],
+                   INNER JOIN installed_git_addon ig ON ig.git_addon_id = ga.id
+                   WHERE ga.addon_folder_id = ?"#,
+                [sea_orm::Value::BigInt(Some(folder_param))],
             ))
-            .all(&db)
+            .all(&service.db)
             .await
             .context(error::DbGetSnafu)?;
 
@@ -2227,24 +2494,31 @@ impl AddonService {
 
     /// Get local (manually installed) addons with installation state.
     pub fn get_local_addons(&self) -> ImmediateValuePromise<Vec<LocalInstalledAddon>> {
-        let db = self.db.clone();
-        ImmediateValuePromise::new(async move { Ok(fetch_local_addons(&db).await?) })
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            let folder_id = service.get_active_folder_id().await;
+            Ok(fetch_local_addons(&service.db, folder_id).await?)
+        })
     }
 
     /// Get git-tracked addons with installation state and repo info.
     pub fn get_git_addons(&self) -> ImmediateValuePromise<Vec<GitInstalledAddon>> {
-        let db = self.db.clone();
-        ImmediateValuePromise::new(async move { Ok(fetch_git_addons(&db).await?) })
+        let service = self.clone();
+        ImmediateValuePromise::new(async move {
+            let folder_id = service.get_active_folder_id().await;
+            Ok(fetch_git_addons(&service.db, folder_id).await?)
+        })
     }
 
     /// Uninstall a locally installed addon by removing its directory and DB records.
     pub fn uninstall_local_addon(&self, local_addon_id: i64) -> ImmediateValuePromise<()> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+
             // Get the addon directory name
             let addon = LocalAddon::Entity::find_by_id(local_addon_id)
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
                 .context(error::AddonNotFoundSnafu { id: local_addon_id })?;
@@ -2259,12 +2533,12 @@ impl AddonService {
 
             // DB records are cascade-deleted when we delete the local_addon row
             LocalAddon::Entity::find_by_id(local_addon_id)
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
                 .context(error::AddonNotFoundSnafu { id: local_addon_id })?
                 .into_active_model()
-                .delete(&db)
+                .delete(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
 
@@ -2278,12 +2552,13 @@ impl AddonService {
 
     /// Uninstall a git-tracked addon by removing its directory and DB records.
     pub fn uninstall_git_addon(&self, git_addon_id: i64) -> ImmediateValuePromise<()> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+
             // Get the addon directory name
             let addon = GitAddon::Entity::find_by_id(git_addon_id)
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
                 .context(error::AddonNotFoundSnafu { id: git_addon_id })?;
@@ -2298,12 +2573,12 @@ impl AddonService {
 
             // DB records are cascade-deleted when we delete the git_addon row
             GitAddon::Entity::find_by_id(git_addon_id)
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
                 .context(error::AddonNotFoundSnafu { id: git_addon_id })?
                 .into_active_model()
-                .delete(&db)
+                .delete(&service.db)
                 .await
                 .context(error::DbDeleteSnafu)?;
 
@@ -2337,6 +2612,7 @@ impl AddonService {
                 addon_id: ActiveValue::Set(esoui_addon_id),
                 version: ActiveValue::Set(esoui_addon.version.clone()),
                 date: ActiveValue::Set(esoui_addon.date.clone()),
+                addon_folder_id: ActiveValue::Set(None),
             })
             .on_conflict(
                 OnConflict::column(InstalledAddon::Column::AddonId)
@@ -2383,11 +2659,12 @@ impl AddonService {
 
     /// Pull a specific git repository and update metadata.
     pub fn pull_git_repo(&self, repo_id: i64) -> ImmediateValuePromise<()> {
-        let db = self.db.clone();
-        let addon_dir = self.get_addon_dir().clone();
+        let service = self.clone();
         ImmediateValuePromise::new(async move {
+            let addon_dir = service.get_active_addon_dir().await?;
+
             let repo = GitRepo::Entity::find_by_id(repo_id)
-                .one(&db)
+                .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
                 .context(error::AddonNotFoundSnafu { id: repo_id })?;
@@ -2405,7 +2682,10 @@ impl AddonService {
             let repo_url = repo.url.clone();
             let mut active: GitRepo::ActiveModel = repo.into_active_model();
             active.last_updated = ActiveValue::Set(Some(now));
-            active.update(&db).await.context(error::DbPutSnafu)?;
+            active
+                .update(&service.db)
+                .await
+                .context(error::DbPutSnafu)?;
 
             info!("Pulled Git repository '{}' (id={})", repo_url, repo_id);
             Ok(())
@@ -2536,6 +2816,7 @@ impl AddonService {
                         addon_id: ActiveValue::Set(x.addon_id),
                         version: ActiveValue::Set("0".to_owned()),
                         date: ActiveValue::Set(x.date),
+                        addon_folder_id: ActiveValue::Set(None),
                     })
                     .collect();
 
@@ -2672,8 +2953,15 @@ fn check_db_result<T>(result: Result<T, DbErr>) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Fetch local addon rows (join with installed state).
-async fn fetch_local_addons(db: &DatabaseConnection) -> Result<Vec<LocalInstalledAddon>> {
-    LocalAddon::Entity::find()
+async fn fetch_local_addons(
+    db: &DatabaseConnection,
+    folder_id: Option<i64>,
+) -> Result<Vec<LocalInstalledAddon>> {
+    let mut query = LocalAddon::Entity::find();
+    if let Some(fid) = folder_id {
+        query = query.filter(LocalAddon::Column::AddonFolderId.eq(Some(fid)));
+    }
+    query
         .column_as(LocalAddon::Column::Id, "id")
         .column_as(LocalAddon::Column::Directory, "directory")
         .column_as(LocalAddon::Column::Title, "title")
@@ -2697,8 +2985,15 @@ async fn fetch_local_addons(db: &DatabaseConnection) -> Result<Vec<LocalInstalle
 }
 
 /// Fetch git addon rows (join with installed state and repo info).
-async fn fetch_git_addons(db: &DatabaseConnection) -> Result<Vec<GitInstalledAddon>> {
-    GitAddon::Entity::find()
+async fn fetch_git_addons(
+    db: &DatabaseConnection,
+    folder_id: Option<i64>,
+) -> Result<Vec<GitInstalledAddon>> {
+    let mut query = GitAddon::Entity::find();
+    if let Some(fid) = folder_id {
+        query = query.filter(GitAddon::Column::AddonFolderId.eq(Some(fid)));
+    }
+    query
         .column_as(GitAddon::Column::Id, "id")
         .column_as(GitAddon::Column::GitRepoId, "repo_id")
         .column_as(GitAddon::Column::Directory, "directory")
@@ -3025,6 +3320,7 @@ where i.addon_id is null
             addon_id: ActiveValue::Set(addon_id),
             version: ActiveValue::Set(version),
             date: ActiveValue::Set(now.to_string()),
+            addon_folder_id: ActiveValue::Set(None),
         })
         .collect();
 
