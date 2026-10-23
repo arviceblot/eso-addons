@@ -1164,17 +1164,15 @@ impl AddonService {
     }
 
     /// Synchronous variant of [`get_active_addon_dir`].
-    /// Reloads config from disk to pick up changes made by cloned service instances
-    /// (e.g. `set_default_addon_folder`), then resolves via `block_in_place`.
+    /// Resolves the active addon directory via `block_in_place` using the
+    /// in-memory config. Does not reload from disk; callers that need to
+    /// persist changes should call `save_config()` explicitly.
     pub fn get_active_addon_dir_sync(&mut self) -> PathBuf {
-        let fresh = Config::load();
-        let fallback = fresh.addon_dir.clone();
-        let prev = std::mem::replace(&mut self.config, fresh);
-        let result = tokio::task::block_in_place(|| {
+        let fallback = self.config.addon_dir.clone();
+        tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async { self.get_active_addon_dir().await })
-        });
-        self.config = prev;
-        result.unwrap_or_else(|e| {
+        })
+        .unwrap_or_else(|e| {
             info!("Fallback to config.addon_dir: {e}");
             fallback.clone()
         })

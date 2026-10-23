@@ -222,7 +222,7 @@ impl Config {
             || !config.pixels_per_point.is_finite()
         {
             info!(
-                "Invalid pixels_per_point ({}) in config, resetting to default",
+                "Invalid pixels_per_point ({:.1}) in config, resetting to default",
                 config.pixels_per_point
             );
             config.pixels_per_point = default_1();
