@@ -39,7 +39,7 @@ impl BBView {
     }
 
     pub fn show(&self, ui: &mut egui::Ui, state: &mut BBState, id_salt: impl egui::AsIdSalt) {
-        let id_base = ui.id().with("bbcode-egui").with(id_salt);
+        let id_base = ui.scope_id().with("bbcode-egui").with(id_salt);
         ui.push_id(id_base, |ui| {
             ui.visuals_mut().indent_has_left_vline = false;
             let mut ctx = Ctx {

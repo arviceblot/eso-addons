@@ -739,8 +739,11 @@ impl eframe::App for EamApp {
                 let _ = io::stdout().flush();
                 self.smoke_reported = true;
             }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
+            // Use direct exit to avoid dpi crate assertion failure during winit
+            // shutdown on headless/software-rendering environments (llvmpipe).
+            // The display connection is already gone by the time the close
+            // event triggers cleanup, causing a NaN scale_factor assertion.
+            std::process::exit(0);
         }
 
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -776,6 +779,13 @@ impl eframe::App for EamApp {
             });
             return;
         }
+
+        // Pre-compute folder path for Browse dialog to avoid block_in_place
+        // inside egui render closures.
+        let browse_suggested = {
+            let current_dir = self.service.get_active_addon_dir_sync();
+            suggest_pts_path(&current_dir)
+        };
 
         egui::Panel::left("main_left")
             .resizable(true)
@@ -900,9 +910,7 @@ impl eframe::App for EamApp {
                                                 );
                                             }
                                             if ui.small_button("🗁 Browse").clicked() {
-                                                let current_dir =
-                                                    self.service.get_active_addon_dir_sync();
-                                                let suggested = suggest_pts_path(&current_dir);
+                                                let suggested = browse_suggested;
                                                 let promise =
                                                     ImmediateValuePromise::new(async move {
                                                         let dialog = rfd::AsyncFileDialog::new()
