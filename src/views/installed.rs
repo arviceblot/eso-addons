@@ -169,7 +169,7 @@ impl View for Installed {
             active_dir
                 .file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| format!("📁 {n}"))
+                .map(|n| format!("[{n}]"))
         };
         egui::Panel::top("installed_top").show(ui, |ui| {
             ui.add_space(5.0);

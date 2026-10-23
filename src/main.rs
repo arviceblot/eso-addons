@@ -802,7 +802,7 @@ impl eframe::App for EamApp {
                     {
                         ui.add_space(5.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("📁 Folder").strong());
+                            ui.label(RichText::new("[Folder]").strong());
                         });
 
                         // Determine active folder
