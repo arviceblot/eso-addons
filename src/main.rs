@@ -38,6 +38,79 @@ const APP_NAME: &str = "ESO Addon Manager";
 pub const REPO: Option<&str> = option_env!("CARGO_PKG_REPOSITORY");
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Detect a human-readable label for an addon folder based on its path.
+/// Heuristics: case-insensitive "live" → "Live", "pts" → "PTS", basename fallback.
+fn detect_folder_label(path: &std::path::Path) -> String {
+    let path_str = path.to_string_lossy().to_string();
+    let lower = path_str.to_lowercase();
+
+    if lower.contains("pts") {
+        return "PTS".to_string();
+    }
+    if lower.contains("live") {
+        return "Live".to_string();
+    }
+
+    // Fallback to directory basename, or "Custom"
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| {
+            // Capitalize first letter
+            let mut c = n.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().chain(c).collect(),
+            }
+        })
+        .unwrap_or_else(|| "Custom".to_string())
+}
+
+/// Suggest a PTS path based on a Live path (or vice-versa). Case-insensitive.
+fn suggest_pts_path(path: &std::path::Path) -> Option<String> {
+    let path_str = path.to_string_lossy().to_string();
+    let lower = path_str.to_lowercase();
+
+    if lower.contains("/pts/") || lower.contains("\\pts\\") {
+        // Already a PTS path, suggest Live instead
+        return Some(case_insensitive_replace(&path_str, "pts", "live"));
+    }
+    if lower.contains("/live/") || lower.contains("\\live\\") {
+        return Some(case_insensitive_replace(&path_str, "live", "pts"));
+    }
+    None
+}
+
+/// Replace a substring case-insensitively, preserving surrounding separator chars.
+fn case_insensitive_replace(s: &str, target: &str, replacement: &str) -> String {
+    let lower = s.to_lowercase();
+    let mut result = String::with_capacity(s.len());
+    let mut last = 0;
+
+    for m in lower.match_indices(target) {
+        let start = m.0;
+        let end = start + target.len();
+        result.push_str(&s[last..start]);
+        result.push_str(replacement);
+        last = end;
+    }
+    result.push_str(&s[last..]);
+    result
+}
+
+/// Truncate a path string for display, keeping start and end visible.
+fn truncate_path_display(path: &str) -> String {
+    const MAX_LEN: usize = 60;
+    if path.len() <= MAX_LEN {
+        return path.to_string();
+    }
+    let start_len = 15;
+    let mid_len = 9; // "///...///"
+    let end_len = MAX_LEN - start_len - mid_len; // 36
+    let start = &path[..start_len];
+    let end = &path[path.len() - end_len..];
+    format!("{start}///...///{end}")
+}
+
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
     dotenv().ok();
@@ -124,7 +197,12 @@ struct EamApp {
     /// Addon folder management
     addon_folders: PromisedValue<Vec<addon_folders::Model>>,
     add_folder_dialog: PromisedValue<Option<String>>,
-    add_folder_label: String,
+    /// Whether the "Add Folder" inline form is expanded
+    add_folder_expanded: bool,
+    /// Text input buffer for the folder label
+    add_folder_label_input: String,
+    /// Path selected by the dialog (set before submitting)
+    add_folder_path: Option<String>,
     add_folder_result: PromisedValue<i64>,
     set_default_folder: PromisedValue<()>,
     remove_folder: PromisedValue<()>,
@@ -189,7 +267,9 @@ impl EamApp {
             smoke_reported: false,
             addon_folders: PromisedValue::default(),
             add_folder_dialog: PromisedValue::default(),
-            add_folder_label: String::new(),
+            add_folder_expanded: false,
+            add_folder_label_input: String::new(),
+            add_folder_path: None,
             add_folder_result: PromisedValue::default(),
             set_default_folder: PromisedValue::default(),
             remove_folder: PromisedValue::default(),
@@ -466,10 +546,12 @@ impl EamApp {
             .poll_recording(&self.service, "Selecting addon folder");
         if self.add_folder_dialog.is_ready() {
             self.add_folder_dialog.handle();
-            if let Some(path) = self.add_folder_dialog.value.as_ref().unwrap() {
-                let label = self.add_folder_label.clone();
-                self.add_folder_result
-                    .set(self.service.add_addon_folder(label, PathBuf::from(path)));
+            // Store selected path and auto-detect label if input is empty
+            if let Some(Some(path)) = self.add_folder_dialog.value.as_ref() {
+                self.add_folder_path = Some(path.clone());
+                if self.add_folder_label_input.is_empty() {
+                    self.add_folder_label_input = detect_folder_label(&PathBuf::from(path));
+                }
             }
         }
 
@@ -480,6 +562,10 @@ impl EamApp {
             self.add_folder_result.handle();
             self.addon_folders.set(self.service.get_addon_folders());
             self.handle_addons_changed();
+            // Collapse form and clear state
+            self.add_folder_expanded = false;
+            self.add_folder_label_input.clear();
+            self.add_folder_path = None;
         }
 
         // Poll set default folder
@@ -777,40 +863,102 @@ impl eframe::App for EamApp {
                                 }
                             }
 
-                            // Add folder button
+                            // Add folder: button or inline form
                             ui.add_space(3.0);
-                            if ui.small_button("➕ Add Folder").clicked() {
-                                self.remove_folder_error = None;
-                                let current_dir = self.service.config.addon_dir.clone();
-                                let suggested = if let Some(path_str) = current_dir.to_str() {
-                                    if path_str.contains("/live/") || path_str.contains("\\live\\")
-                                    {
-                                        let mut pts = path_str.replace("/live/", "/pts/");
-                                        pts = pts.replace("\\live\\", "\\pts\\");
-                                        Some(pts)
-                                    } else {
-                                        None
+                            ui.horizontal(|ui| {
+                                if !self.add_folder_expanded {
+                                    if ui.small_button("➕ Add Folder").clicked() {
+                                        self.remove_folder_error = None;
+                                        self.add_folder_expanded = true;
+                                        self.add_folder_label_input.clear();
+                                        self.add_folder_path = None;
                                     }
                                 } else {
-                                    None
-                                };
-                                let promise = ImmediateValuePromise::new(async move {
-                                    let dialog = rfd::AsyncFileDialog::new()
-                                        .set_title("Select addon folder");
-                                    let dialog = if let Some(suggested) = suggested {
-                                        dialog.set_directory(&suggested)
-                                    } else {
-                                        dialog
-                                    };
-                                    let result = dialog.pick_folder().await;
-                                    if let Some(path) = result {
-                                        Ok(Some(path.path().to_string_lossy().to_string()))
-                                    } else {
-                                        Ok(None::<String>)
-                                    }
-                                });
-                                self.add_folder_dialog.set(promise);
-                            }
+                                    // Inline form for adding a folder
+                                    ui.vertical(|ui| {
+                                        // Label input
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("Label:").small());
+                                            ui.text_edit_singleline(
+                                                &mut self.add_folder_label_input,
+                                            );
+                                        });
+
+                                        // Path display / browse
+                                        ui.horizontal(|ui| {
+                                            if let Some(ref path) = self.add_folder_path {
+                                                ui.label(
+                                                    RichText::new(truncate_path_display(path))
+                                                        .small()
+                                                        .weak(),
+                                                );
+                                            } else {
+                                                ui.label(
+                                                    RichText::new("No folder selected")
+                                                        .small()
+                                                        .weak(),
+                                                );
+                                            }
+                                            if ui.small_button("🗁 Browse").clicked() {
+                                                let current_dir =
+                                                    self.service.get_active_addon_dir_sync();
+                                                let suggested = suggest_pts_path(&current_dir);
+                                                let promise =
+                                                    ImmediateValuePromise::new(async move {
+                                                        let dialog = rfd::AsyncFileDialog::new()
+                                                            .set_title("Select addon folder");
+                                                        let dialog =
+                                                            if let Some(suggested) = suggested {
+                                                                dialog.set_directory(&suggested)
+                                                            } else {
+                                                                dialog
+                                                            };
+                                                        let result = dialog.pick_folder().await;
+                                                        if let Some(path) = result {
+                                                            Ok(Some(
+                                                                path.path()
+                                                                    .to_string_lossy()
+                                                                    .to_string(),
+                                                            ))
+                                                        } else {
+                                                            Ok(None::<String>)
+                                                        }
+                                                    });
+                                                self.add_folder_dialog.set(promise);
+                                            }
+                                        });
+
+                                        // Confirm / Cancel
+                                        ui.horizontal(|ui| {
+                                            let label_ok =
+                                                !self.add_folder_label_input.trim().is_empty();
+                                            let path_ok = self.add_folder_path.is_some();
+                                            if ui
+                                                .add_enabled(
+                                                    label_ok && path_ok,
+                                                    egui::Button::new("Confirm"),
+                                                )
+                                                .clicked()
+                                            {
+                                                let label =
+                                                    self.add_folder_label_input.trim().to_string();
+                                                let path = self.add_folder_path.clone().unwrap();
+                                                self.add_folder_result.set(
+                                                    self.service.add_addon_folder(
+                                                        label,
+                                                        PathBuf::from(path),
+                                                    ),
+                                                );
+                                            }
+                                            if ui.small_button("Cancel").clicked() {
+                                                self.add_folder_expanded = false;
+                                                self.add_folder_label_input.clear();
+                                                self.add_folder_path = None;
+                                            }
+                                        });
+                                    });
+                                }
+                            });
                         }
                     }
 
@@ -999,5 +1147,118 @@ impl eframe::App for EamApp {
                 AddonResponseType::None => {}
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod path_heuristic_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_detect_folder_label_live() {
+        assert_eq!(
+            detect_folder_label(Path::new(
+                "/home/user/My Games/The Elder Scrolls Online/live/AddOns"
+            )),
+            "Live"
+        );
+        // Case insensitive
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/LIVE/AddOns")),
+            "Live"
+        );
+        // Windows-style
+        assert_eq!(
+            detect_folder_label(Path::new("C:\\Users\\eso\\My Games\\ESO\\live\\AddOns")),
+            "Live"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_pts() {
+        assert_eq!(
+            detect_folder_label(Path::new(
+                "/home/user/My Games/The Elder Scrolls Online/pts/AddOns"
+            )),
+            "PTS"
+        );
+        // PTS takes precedence over Live
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/live-pts-mixed/AddOns")),
+            "PTS"
+        );
+        // Case insensitive
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/PTS/AddOns")),
+            "PTS"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_basename_fallback() {
+        assert_eq!(
+            detect_folder_label(Path::new("/games/eso/custom_folder")),
+            "Custom_folder"
+        );
+        assert_eq!(
+            detect_folder_label(Path::new("/path/to/my_addons")),
+            "My_addons"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_custom_fallback() {
+        // Path with no file_name component
+        assert_eq!(detect_folder_label(Path::new("/")), "Custom");
+    }
+
+    #[test]
+    fn test_suggest_pts_path_live_to_pts() {
+        let live = Path::new("/home/user/My Games/The Elder Scrolls Online/live/AddOns");
+        let suggested = suggest_pts_path(live);
+        assert_eq!(
+            suggested,
+            Some("/home/user/My Games/The Elder Scrolls Online/pts/AddOns".to_string())
+        );
+    }
+
+    #[test]
+    fn test_suggest_pts_path_pts_to_live() {
+        let pts = Path::new("/home/user/My Games/The Elder Scrolls Online/pts/AddOns");
+        let suggested = suggest_pts_path(pts);
+        assert_eq!(
+            suggested,
+            Some("/home/user/My Games/The Elder Scrolls Online/live/AddOns".to_string())
+        );
+    }
+
+    #[test]
+    fn test_suggest_pts_path_case_insensitive() {
+        let live = Path::new("/games/ESO/LIVE/AddOns");
+        let suggested = suggest_pts_path(live);
+        assert!(suggested.is_some());
+        assert!(suggested.unwrap().to_lowercase().contains("pts"));
+    }
+
+    #[test]
+    fn test_suggest_pts_path_no_match() {
+        let custom = Path::new("/games/ESO/unknown/AddOns");
+        assert!(suggest_pts_path(custom).is_none());
+    }
+
+    #[test]
+    fn test_truncate_path_display_short() {
+        let short = "/short/path";
+        assert_eq!(truncate_path_display(short), short);
+    }
+
+    #[test]
+    fn test_truncate_path_display_long() {
+        let long = "/home/user/My Games/The Elder Scrolls Online/live/AddOns/very/deep/path";
+        let truncated = truncate_path_display(long);
+        assert!(truncated.len() <= 60);
+        assert!(truncated.starts_with("/home/user/My "));
+        assert!(truncated.ends_with("ery/deep/path"));
     }
 }

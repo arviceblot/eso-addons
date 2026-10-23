@@ -147,7 +147,7 @@ impl View for Installed {
         &mut self,
         _ctx: &egui::Context,
         ui: &mut egui::Ui,
-        _service: &mut AddonService,
+        service: &mut AddonService,
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
 
@@ -166,6 +166,11 @@ impl View for Installed {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("Installed - {total} addons")).heading());
+                // Folder breadcrumb: show active folder basename
+                let active_dir = service.get_active_addon_dir_sync();
+                if let Some(basename) = active_dir.file_name().and_then(|n| n.to_str()) {
+                    ui.label(RichText::new(format!("📁 {basename}")).small().weak());
+                }
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     let updateable_count = self.get_updateable_count();
                     if updateable_count > 0
