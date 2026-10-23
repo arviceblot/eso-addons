@@ -213,6 +213,21 @@ impl Config {
             config.version = VERSION.to_string();
         }
 
+        // Validate pixels_per_point: must be a positive finite value in a reasonable range.
+        // A corrupted config file (e.g. pixels_per_point: 0.0) causes dpi crate assertion
+        // failures in egui-winit's update_viewport_info, since scale_factor of 0 or NaN
+        // rejects the `validate_scale_factor` check in dpi::Size::Physical::to_logical().
+        if config.pixels_per_point <= 0.0
+            || config.pixels_per_point > 4.0
+            || !config.pixels_per_point.is_finite()
+        {
+            info!(
+                "Invalid pixels_per_point ({}) in config, resetting to default",
+                config.pixels_per_point
+            );
+            config.pixels_per_point = default_1();
+        }
+
         // write defaults for immediate use
         config.save().unwrap();
         config
