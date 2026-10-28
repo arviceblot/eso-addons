@@ -147,7 +147,7 @@ impl View for Installed {
         &mut self,
         _ctx: &egui::Context,
         ui: &mut egui::Ui,
-        _service: &mut AddonService,
+        service: &mut AddonService,
     ) -> AddonResponse {
         let mut response = AddonResponse::default();
 
@@ -162,10 +162,22 @@ impl View for Installed {
         }
 
         // Top panel: title and actions
+        // Compute folder breadcrumb outside egui render closure to avoid
+        // block_in_place interfering with layout.
+        let folder_breadcrumb = {
+            let active_dir = service.get_active_addon_dir_sync();
+            active_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| format!("📁 {n}"))
+        };
         egui::Panel::top("installed_top").show(ui, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("Installed - {total} addons")).heading());
+                if let Some(breadcrumb) = &folder_breadcrumb {
+                    ui.label(RichText::new(breadcrumb).small().weak());
+                }
                 ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                     let updateable_count = self.get_updateable_count();
                     if updateable_count > 0

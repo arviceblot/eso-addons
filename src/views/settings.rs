@@ -232,7 +232,7 @@ impl View for Settings {
                 ui.label(RichText::new("ℹ NOTE").strong());
                 ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        format!("Changing the addon folder will not move any previously installed addons! Any previously tracked addons will become unmanaged even if the folder is changed back.{}", if env::var("container").is_ok() { " Ensure the flatpak has permission for the chosen directory!"} else {""}),
+                        format!("Changing the addon folder will not move any previously installed addons! Any previously tracked addons will become unmanaged even if the folder is changed back. Use the folder selector in the sidebar to switch between folders.{}", if env::var("container").is_ok() { " Ensure the flatpak has permission for the chosen directory!"} else {""}),
                     );
                 });
             });

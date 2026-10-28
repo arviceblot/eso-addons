@@ -18,6 +18,7 @@ pub struct Model {
     pub description: Option<String>,
     pub remote_version: Option<String>,
     pub remote_add_on_version: Option<i64>,
+    pub addon_folder_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

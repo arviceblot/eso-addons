@@ -145,6 +145,10 @@ pub struct Config {
     pub ttc_region: TTCRegion,
     #[serde(default = "default_1")]
     pub pixels_per_point: f32,
+    /// ID of the currently active addon folder.
+    /// When `None`, falls back to the folder where `is_default = 1` in the DB.
+    #[serde(default)]
+    pub active_addon_folder_id: Option<i64>,
 }
 impl Config {
     pub fn load() -> Config {
@@ -207,6 +211,21 @@ impl Config {
         // update conf version
         if conf_version < Version::from(VERSION).unwrap() {
             config.version = VERSION.to_string();
+        }
+
+        // Validate pixels_per_point: must be a positive finite value in a reasonable range.
+        // A corrupted config file (e.g. pixels_per_point: 0.0) causes dpi crate assertion
+        // failures in egui-winit's update_viewport_info, since scale_factor of 0 or NaN
+        // rejects the `validate_scale_factor` check in dpi::Size::Physical::to_logical().
+        if config.pixels_per_point <= 0.0
+            || config.pixels_per_point > 4.0
+            || !config.pixels_per_point.is_finite()
+        {
+            info!(
+                "Invalid pixels_per_point ({:.1}) in config, resetting to default",
+                config.pixels_per_point
+            );
+            config.pixels_per_point = default_1();
         }
 
         // write defaults for immediate use

@@ -151,8 +151,8 @@ impl Details {
         self.manifest_dep_dirs
             .poll_recording(service, "Loading installed directories");
 
-        // Build the full addon directory path
-        let addon_dir = service.get_addon_dir();
+        // Build the full addon directory path (use resolved active folder)
+        let addon_dir = service.get_active_addon_dir_sync();
         let full_path = addon_dir.join(&addon.directory);
         let full_path_str = full_path.to_string_lossy().to_string();
 
