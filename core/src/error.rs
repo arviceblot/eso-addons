@@ -163,8 +163,21 @@ pub enum Error {
     #[snafu(display("Cannot remove default addon folder '{}'", label))]
     AddonFolderIsDefault { label: String },
 
-    #[snafu(display("Cannot remove addon folder: it still has associated addons"))]
-    AddonFolderHasAddons,
+    #[snafu(display(
+        "Cannot remove addon folder '{}': it still has {} associated addon(s)",
+        label,
+        count
+    ))]
+    AddonFolderHasAddons { label: String, count: u64 },
+
+    #[snafu(display("Addon folder with ID {} not found", id))]
+    AddonFolderNotFound { id: i64 },
+
+    #[snafu(display("Addon folder with path '{}' already exists", path))]
+    AddonFolderAlreadyExists { path: String },
+
+    #[snafu(display("Addon folder path '{}' does not exist or is not a directory", path))]
+    AddonFolderPathInvalid { path: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

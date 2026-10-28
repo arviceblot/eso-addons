@@ -33,6 +33,7 @@ eframe = { version = "0.37.0", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "glow",
+    "system_fonts",
     "wayland",
     "x11",
 ] }

@@ -105,13 +105,25 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
 
-        // Drop addon_folder_id columns from tables
-        for table in &["installed_addon", "git_addon", "local_addon"] {
-            db.execute_raw(Statement::from_string(
+        // Drop addon_folder_id columns from tables.
+        // SQLite < 3.35 doesn't support DROP COLUMN; fall back to table recreation.
+        for table in &["installed_addon", "local_addon", "git_addon"] {
+            let stmt = Statement::from_string(
                 DatabaseBackend::Sqlite,
                 format!("ALTER TABLE {table} DROP COLUMN {ADDON_FOLDER_ID}"),
-            ))
-            .await?;
+            );
+            match db.execute_raw(stmt).await {
+                Ok(_) => continue,
+                Err(e) => {
+                    // SQLite < 3.35 doesn't support DROP COLUMN.
+                    // Fall back to table recreation.
+                    eprintln!(
+                        "WARN: DROP COLUMN on `{table}` failed ({e}). Falling back to table recreation. \
+                         Upgrade to SQLite >= 3.35 for native support."
+                    );
+                    drop_column_fallback(db, table, ADDON_FOLDER_ID).await?;
+                }
+            }
         }
 
         // Drop the addon_folders table
@@ -121,4 +133,65 @@ impl MigrationTrait for Migration {
 
         Ok(())
     }
+}
+
+/// Fallback for SQLite < 3.35 which doesn't support `ALTER TABLE ... DROP COLUMN`.
+/// Recreates the table without the specified column by:
+/// 1. Getting existing column info via PRAGMA
+/// 2. Creating a new temp table without the target column
+/// 3. Copying data, then swapping tables
+async fn drop_column_fallback(
+    db: &impl ConnectionTrait,
+    table: &str,
+    drop_col: &str,
+) -> Result<(), DbErr> {
+    // Collect columns excluding the one to drop
+    let columns: Vec<String> = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("PRAGMA table_info({table})"),
+        ))
+        .await?
+        .iter()
+        .filter_map(|row| {
+            row.try_get("", "name")
+                .ok()
+                .filter(|n: &String| n != drop_col)
+        })
+        .collect();
+
+    if columns.is_empty() {
+        // Table has no other columns; just drop and recreate
+        db.execute_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            format!("DROP TABLE {table}"),
+        ))
+        .await?;
+        return Ok(());
+    }
+
+    let col_list = columns.join(", ");
+    let temp_table = format!("{table}_tmp");
+
+    // Create new table without the target column
+    db.execute_raw(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        format!("CREATE TABLE {temp_table} AS SELECT {col_list} FROM {table}"),
+    ))
+    .await?;
+
+    // Drop original and rename temp
+    db.execute_raw(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        format!("DROP TABLE {table}"),
+    ))
+    .await?;
+
+    db.execute_raw(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        format!("ALTER TABLE {temp_table} RENAME TO {table}"),
+    ))
+    .await?;
+
+    Ok(())
 }

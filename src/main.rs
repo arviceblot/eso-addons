@@ -5,6 +5,7 @@ use eframe::egui::{self, RichText, Visuals, vec2};
 use entity::addon_folders;
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
+use eso_addons_core::service::fs_util::suggest_alternate_game_path;
 use eso_addons_core::service::result::{
     AddonDepOption, AddonShowDetails, GitAddonResult, LocalAddonResult, ManifestAddonDetails,
     UpdateResult,
@@ -63,38 +64,6 @@ fn detect_folder_label(path: &std::path::Path) -> String {
             }
         })
         .unwrap_or_else(|| "Custom".to_string())
-}
-
-/// Suggest a PTS path based on a Live path (or vice-versa). Case-insensitive.
-fn suggest_pts_path(path: &std::path::Path) -> Option<String> {
-    let path_str = path.to_string_lossy().to_string();
-    let lower = path_str.to_lowercase();
-
-    if lower.contains("/pts/") || lower.contains("\\pts\\") {
-        // Already a PTS path, suggest Live instead
-        return Some(case_insensitive_replace(&path_str, "pts", "live"));
-    }
-    if lower.contains("/live/") || lower.contains("\\live\\") {
-        return Some(case_insensitive_replace(&path_str, "live", "pts"));
-    }
-    None
-}
-
-/// Replace a substring case-insensitively, preserving surrounding separator chars.
-fn case_insensitive_replace(s: &str, target: &str, replacement: &str) -> String {
-    let lower = s.to_lowercase();
-    let mut result = String::with_capacity(s.len());
-    let mut last = 0;
-
-    for m in lower.match_indices(target) {
-        let start = m.0;
-        let end = start + target.len();
-        result.push_str(&s[last..start]);
-        result.push_str(replacement);
-        last = end;
-    }
-    result.push_str(&s[last..]);
-    result
 }
 
 /// Truncate a path string for display, keeping start and end visible.
@@ -560,8 +529,7 @@ impl EamApp {
             .poll_recording(&self.service, "Adding addon folder");
         if self.add_folder_result.is_ready() {
             self.add_folder_result.handle();
-            self.addon_folders.set(self.service.get_addon_folders());
-            self.handle_addons_changed();
+            self.handle_folder_operation_result();
             // Collapse form and clear state
             self.add_folder_expanded = false;
             self.add_folder_label_input.clear();
@@ -573,8 +541,7 @@ impl EamApp {
             .poll_recording(&self.service, "Setting default addon folder");
         if self.set_default_folder.is_ready() {
             self.set_default_folder.handle();
-            self.addon_folders.set(self.service.get_addon_folders());
-            self.handle_addons_changed();
+            self.handle_folder_operation_result();
         }
 
         // Poll remove folder
@@ -582,8 +549,7 @@ impl EamApp {
             .poll_recording(&self.service, "Removing addon folder");
         if self.remove_folder.is_ready() {
             self.remove_folder.handle();
-            self.addon_folders.set(self.service.get_addon_folders());
-            self.handle_addons_changed();
+            self.handle_folder_operation_result();
         }
     }
 
@@ -659,6 +625,13 @@ impl EamApp {
         self.search.reset(&mut self.service);
         self.details.reset(&mut self.service);
         self.author_view.reset(&mut self.service);
+    }
+
+    /// Refresh addon folder list and trigger addon change handling.
+    /// Called after folder operations (add/set-default/remove) complete.
+    fn handle_folder_operation_result(&mut self) {
+        self.addon_folders.set(self.service.get_addon_folders());
+        self.handle_addons_changed();
     }
 
     fn remove_addon(&mut self, addon_id: i64) {
@@ -784,7 +757,7 @@ impl eframe::App for EamApp {
         // inside egui render closures.
         let browse_suggested = {
             let current_dir = self.service.get_active_addon_dir_sync();
-            suggest_pts_path(&current_dir)
+            suggest_alternate_game_path(&current_dir)
         };
 
         egui::Panel::left("main_left")
@@ -802,7 +775,7 @@ impl eframe::App for EamApp {
                     {
                         ui.add_space(5.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("[Folder]").strong());
+                            ui.label(RichText::new("📁 Folder").strong());
                         });
 
                         // Determine active folder
@@ -950,7 +923,8 @@ impl eframe::App for EamApp {
                                             {
                                                 let label =
                                                     self.add_folder_label_input.trim().to_string();
-                                                let path = self.add_folder_path.clone().unwrap();
+                                                let path = self.add_folder_path.clone()
+                                                    .expect("add_folder_path should be Some; button is only enabled when path is set");
                                                 self.add_folder_result.set(
                                                     self.service.add_addon_folder(
                                                         label,
@@ -1224,7 +1198,7 @@ mod path_heuristic_tests {
     #[test]
     fn test_suggest_pts_path_live_to_pts() {
         let live = Path::new("/home/user/My Games/The Elder Scrolls Online/live/AddOns");
-        let suggested = suggest_pts_path(live);
+        let suggested = suggest_alternate_game_path(live);
         assert_eq!(
             suggested,
             Some("/home/user/My Games/The Elder Scrolls Online/pts/AddOns".to_string())
@@ -1234,7 +1208,7 @@ mod path_heuristic_tests {
     #[test]
     fn test_suggest_pts_path_pts_to_live() {
         let pts = Path::new("/home/user/My Games/The Elder Scrolls Online/pts/AddOns");
-        let suggested = suggest_pts_path(pts);
+        let suggested = suggest_alternate_game_path(pts);
         assert_eq!(
             suggested,
             Some("/home/user/My Games/The Elder Scrolls Online/live/AddOns".to_string())
@@ -1244,7 +1218,7 @@ mod path_heuristic_tests {
     #[test]
     fn test_suggest_pts_path_case_insensitive() {
         let live = Path::new("/games/ESO/LIVE/AddOns");
-        let suggested = suggest_pts_path(live);
+        let suggested = suggest_alternate_game_path(live);
         assert!(suggested.is_some());
         assert!(suggested.unwrap().to_lowercase().contains("pts"));
     }
@@ -1252,7 +1226,7 @@ mod path_heuristic_tests {
     #[test]
     fn test_suggest_pts_path_no_match() {
         let custom = Path::new("/games/ESO/unknown/AddOns");
-        assert!(suggest_pts_path(custom).is_none());
+        assert!(suggest_alternate_game_path(custom).is_none());
     }
 
     #[test]

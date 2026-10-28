@@ -50,7 +50,7 @@ use walkdir::WalkDir;
 use zip::ZipArchive;
 
 mod backup;
-mod fs_util;
+pub mod fs_util;
 mod git;
 pub mod result;
 
@@ -124,6 +124,17 @@ impl AddonService {
         // Ensure addon_folders table is seeded (no-op if migration already handled it)
         if let Err(e) = service.init_default_folder().await {
             warn!("Failed to init default addon folder: {e}");
+        }
+
+        // Validate the active addon folder path exists on disk.
+        if let Ok(active_dir) = service.get_active_addon_dir().await
+            && !active_dir.exists()
+        {
+            warn!(
+                "Active addon folder path does not exist: {}. \
+                 Addons may not load until this is corrected.",
+                active_dir.display()
+            );
         }
 
         service
@@ -1167,38 +1178,38 @@ impl AddonService {
     /// Resolves the active addon directory via `block_in_place` using the
     /// in-memory config. Does not reload from disk; callers that need to
     /// persist changes should call `save_config()` explicitly.
-    pub fn get_active_addon_dir_sync(&mut self) -> PathBuf {
+    pub fn get_active_addon_dir_sync(&self) -> PathBuf {
         let fallback = self.config.addon_dir.clone();
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async { self.get_active_addon_dir().await })
         })
         .unwrap_or_else(|e| {
             info!("Fallback to config.addon_dir: {e}");
-            fallback.clone()
+            fallback
         })
     }
 
     /// Resolve the active addon folder ID.
     /// Priority: config.active_addon_folder_id > DB row with is_default=1 > None.
     async fn get_active_folder_id(&self) -> Option<i64> {
+        // Fetch all folders in a single query and resolve in memory.
+        let folders = match AddonFolders::Entity::find().all(&self.db).await {
+            Ok(folders) => folders,
+            Err(e) => {
+                log::warn!("Failed to query addon folders: {}", e);
+                return None;
+            }
+        };
+
         // Try config reference first
         if let Some(id) = self.config.active_addon_folder_id
-            && AddonFolders::Entity::find_by_id(id)
-                .one(&self.db)
-                .await
-                .is_ok_and(|m| m.is_some())
+            && folders.iter().any(|f| f.id == id)
         {
             return Some(id);
         }
 
         // Fall back to DB default
-        AddonFolders::Entity::find()
-            .filter(AddonFolders::Column::IsDefault.eq(1))
-            .one(&self.db)
-            .await
-            .ok()
-            .flatten()
-            .map(|f| f.id)
+        folders.iter().find(|f| f.is_default == 1).map(|f| f.id)
     }
 
     /// List all registered addon folders.
@@ -1215,14 +1226,41 @@ impl AddonService {
     }
 
     /// Add a new addon folder.
+    /// Validates that the path exists, is a directory, and is not already registered.
     pub fn add_addon_folder(&self, label: String, path: PathBuf) -> ImmediateValuePromise<i64> {
         let db = self.db.clone();
         ImmediateValuePromise::new(async move {
-            let path_str = path.to_string_lossy().to_string();
+            // Validate path exists and is a directory
+            if !(path.exists() && path.is_dir()) {
+                Err(error::Error::AddonFolderPathInvalid {
+                    path: path.to_string_lossy().to_string(),
+                })?;
+            }
+
+            // Normalize path for comparison (canonicalize if possible)
+            let normalized = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_string();
+
+            // Check for duplicate path
+            let exists = AddonFolders::Entity::find()
+                .filter(AddonFolders::Column::Path.eq(normalized.clone()))
+                .one(&db)
+                .await
+                .context(error::DbGetSnafu)?
+                .is_some();
+            if exists {
+                Err(error::Error::AddonFolderAlreadyExists {
+                    path: normalized.clone(),
+                })?;
+            }
+
             let active = AddonFolders::ActiveModel {
                 id: ActiveValue::NotSet,
                 label: ActiveValue::Set(label),
-                path: ActiveValue::Set(path_str),
+                path: ActiveValue::Set(normalized),
                 is_default: ActiveValue::Set(0),
                 created_at: ActiveValue::Set("CURRENT_TIMESTAMP".to_string()),
             };
@@ -1235,11 +1273,11 @@ impl AddonService {
     pub fn set_default_addon_folder(&mut self, id: i64) -> ImmediateValuePromise<()> {
         let mut service = self.clone();
         ImmediateValuePromise::new(async move {
-            AddonFolders::Entity::find_by_id(id)
+            let _folder = AddonFolders::Entity::find_by_id(id)
                 .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
-                .context(error::AddonNotFoundSnafu { id })?;
+                .context(error::AddonFolderNotFoundSnafu { id })?;
 
             AddonFolders::Entity::update_many()
                 .col_expr(
@@ -1274,7 +1312,7 @@ impl AddonService {
                 .one(&service.db)
                 .await
                 .context(error::DbGetSnafu)?
-                .context(error::AddonNotFoundSnafu { id })?;
+                .context(error::AddonFolderNotFoundSnafu { id })?;
 
             if folder.is_default == 1 {
                 Err(error::Error::AddonFolderIsDefault {
@@ -1300,8 +1338,12 @@ impl AddonService {
                 .await
                 .context(error::DbGetSnafu)?;
 
-            if local_count + git_count + installed_count > 0 {
-                Err(error::Error::AddonFolderHasAddons)?;
+            let total_count = local_count + git_count + installed_count;
+            if total_count > 0 {
+                Err(error::Error::AddonFolderHasAddons {
+                    label: folder.label.clone(),
+                    count: total_count,
+                })?;
             }
 
             folder
@@ -3449,6 +3491,7 @@ mod addon_folder_tests {
     use super::*;
     use lazy_async_promise::ImmediateValueState;
     use std::time::Duration;
+    use tempfile::TempDir;
 
     /// Create an AddonService with an in-memory SQLite database for testing.
     async fn new_test_service() -> AddonService {
@@ -3511,8 +3554,11 @@ mod addon_folder_tests {
     #[tokio::test]
     async fn test_add_addon_folder() {
         let service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let pts_dir = tmpdir.path().join("pts");
+        std::fs::create_dir(&pts_dir).unwrap();
 
-        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let mut promise = service.add_addon_folder("PTS".to_string(), pts_dir);
         let id = resolve_promise(&mut promise).await.expect("should succeed");
         assert_eq!(id, 2);
 
@@ -3526,8 +3572,11 @@ mod addon_folder_tests {
     #[tokio::test]
     async fn test_set_default_addon_folder() {
         let service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let pts_dir = tmpdir.path().join("pts");
+        std::fs::create_dir(&pts_dir).unwrap();
 
-        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let mut promise = service.add_addon_folder("PTS".to_string(), pts_dir);
         let new_id = resolve_promise(&mut promise).await.expect("should succeed");
 
         // Set PTS as default
@@ -3546,8 +3595,11 @@ mod addon_folder_tests {
     #[tokio::test]
     async fn test_remove_addon_folder_success() {
         let service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let pts_dir = tmpdir.path().join("pts");
+        std::fs::create_dir(&pts_dir).unwrap();
 
-        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let mut promise = service.add_addon_folder("PTS".to_string(), pts_dir);
         let new_id = resolve_promise(&mut promise).await.expect("should succeed");
 
         {
@@ -3593,13 +3645,80 @@ mod addon_folder_tests {
     #[tokio::test]
     async fn test_get_active_folder_id_config_override() {
         let mut service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let pts_dir = tmpdir.path().join("pts");
+        std::fs::create_dir(&pts_dir).unwrap();
 
         // Add a second folder and set it as active via config
-        let mut promise = service.add_addon_folder("PTS".to_string(), PathBuf::from("/tmp/pts"));
+        let mut promise = service.add_addon_folder("PTS".to_string(), pts_dir);
         let new_id = resolve_promise(&mut promise).await.expect("should succeed");
         service.config.active_addon_folder_id = Some(new_id);
 
         let id = service.get_active_folder_id().await.unwrap();
         assert_eq!(id, new_id);
+    }
+
+    #[tokio::test]
+    async fn test_add_addon_folder_rejects_nonexistent_path() {
+        let service = new_test_service().await;
+
+        let mut promise = service.add_addon_folder(
+            "NonExistent".to_string(),
+            PathBuf::from("/tmp/this_path_does_not_exist_12345"),
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let state = promise.poll_state();
+        assert!(
+            matches!(&state, ImmediateValueState::Error(e) if e
+                .downcast_ref::<error::Error>()
+                .map(|e| matches!(e, error::Error::AddonFolderPathInvalid { .. }))
+                .unwrap_or(false)),
+            "expected AddonFolderPathInvalid error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_addon_folder_rejects_duplicate_path() {
+        let service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let pts_dir = tmpdir.path().join("pts");
+        std::fs::create_dir(&pts_dir).unwrap();
+
+        // Add folder once
+        let mut promise = service.add_addon_folder("PTS".to_string(), pts_dir.clone());
+        resolve_promise(&mut promise)
+            .await
+            .expect("first add should succeed");
+
+        // Add same path again (should fail)
+        let mut promise = service.add_addon_folder("PTS Duplicate".to_string(), pts_dir);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let state = promise.poll_state();
+        assert!(
+            matches!(&state, ImmediateValueState::Error(e) if e
+                .downcast_ref::<error::Error>()
+                .map(|e| matches!(e, error::Error::AddonFolderAlreadyExists { .. }))
+                .unwrap_or(false)),
+            "expected AddonFolderAlreadyExists error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_addon_folder_rejects_file_path() {
+        let service = new_test_service().await;
+        let tmpdir = TempDir::new().unwrap();
+        let file_path = tmpdir.path().join("notadir.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let mut promise = service.add_addon_folder("FileNotDir".to_string(), file_path);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let state = promise.poll_state();
+        assert!(
+            matches!(&state, ImmediateValueState::Error(e) if e
+                .downcast_ref::<error::Error>()
+                .map(|e| matches!(e, error::Error::AddonFolderPathInvalid { .. }))
+                .unwrap_or(false)),
+            "expected AddonFolderPathInvalid error for file path"
+        );
     }
 }
