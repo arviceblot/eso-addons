@@ -53,6 +53,33 @@ pub fn suggest_alternate_game_path(path: &Path) -> Option<String> {
     None
 }
 
+/// Detect a human-readable label for an addon folder based on its path.
+/// Returns "Live", "PTS", a capitalized basename, or "Custom".
+pub fn detect_folder_label(path: &Path) -> String {
+    let path_str = path.to_string_lossy().to_string();
+    let lower = path_str.to_lowercase();
+
+    if lower.contains("pts") {
+        return "PTS".to_string();
+    }
+    if lower.contains("live") {
+        return "Live".to_string();
+    }
+
+    // Fallback to directory basename, or "Custom"
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| {
+            // Capitalize first letter
+            let mut c = n.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().chain(c).collect(),
+            }
+        })
+        .unwrap_or_else(|| "Custom".to_string())
+}
+
 /// Try to parse a manifest file at the given path.
 /// Returns `None` if the file doesn't exist or can't be parsed.
 pub fn parse_manifest_file(path: &Path) -> Option<eso_addon_manifest::AddonManifest> {
@@ -171,4 +198,101 @@ pub fn fs_delete_addon(addon_path: &PathBuf, addon_dirs: &[AddonDir::Model]) -> 
         fs::remove_dir_all(&full_path).context(error::AddonDeleteSnafu { dir: full_path })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_folder_label_live() {
+        assert_eq!(
+            detect_folder_label(Path::new(
+                "/home/user/My Games/The Elder Scrolls Online/live/AddOns"
+            )),
+            "Live"
+        );
+        // Case insensitive
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/LIVE/AddOns")),
+            "Live"
+        );
+        // Windows-style
+        assert_eq!(
+            detect_folder_label(Path::new("C:\\Users\\eso\\My Games\\ESO\\live\\AddOns")),
+            "Live"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_pts() {
+        assert_eq!(
+            detect_folder_label(Path::new(
+                "/home/user/My Games/The Elder Scrolls Online/pts/AddOns"
+            )),
+            "PTS"
+        );
+        // PTS takes precedence over Live
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/live-pts-mixed/AddOns")),
+            "PTS"
+        );
+        // Case insensitive
+        assert_eq!(
+            detect_folder_label(Path::new("/games/ESO/PTS/AddOns")),
+            "PTS"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_basename_fallback() {
+        assert_eq!(
+            detect_folder_label(Path::new("/games/eso/custom_folder")),
+            "Custom_folder"
+        );
+        assert_eq!(
+            detect_folder_label(Path::new("/path/to/my_addons")),
+            "My_addons"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_label_custom_fallback() {
+        // Path with no file_name component
+        assert_eq!(detect_folder_label(Path::new("/")), "Custom");
+    }
+
+    #[test]
+    fn test_suggest_alternate_game_path_live_to_pts() {
+        let live = Path::new("/home/user/My Games/The Elder Scrolls Online/live/AddOns");
+        let suggested = suggest_alternate_game_path(live);
+        assert_eq!(
+            suggested,
+            Some("/home/user/My Games/The Elder Scrolls Online/pts/AddOns".to_string())
+        );
+    }
+
+    #[test]
+    fn test_suggest_alternate_game_path_pts_to_live() {
+        let pts = Path::new("/home/user/My Games/The Elder Scrolls Online/pts/AddOns");
+        let suggested = suggest_alternate_game_path(pts);
+        assert_eq!(
+            suggested,
+            Some("/home/user/My Games/The Elder Scrolls Online/live/AddOns".to_string())
+        );
+    }
+
+    #[test]
+    fn test_suggest_alternate_game_path_case_insensitive() {
+        let live = Path::new("/games/ESO/LIVE/AddOns");
+        let suggested = suggest_alternate_game_path(live);
+        assert!(suggested.is_some());
+        assert!(suggested.unwrap().to_lowercase().contains("pts"));
+    }
+
+    #[test]
+    fn test_suggest_alternate_game_path_no_match() {
+        let custom = Path::new("/games/ESO/unknown/AddOns");
+        assert!(suggest_alternate_game_path(custom).is_none());
+    }
 }

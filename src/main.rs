@@ -5,7 +5,7 @@ use eframe::egui::{self, RichText, Visuals, vec2};
 use entity::addon_folders;
 use eso_addons_core::config;
 use eso_addons_core::service::AddonService;
-use eso_addons_core::service::fs_util::suggest_alternate_game_path;
+use eso_addons_core::service::fs_util::{detect_folder_label, suggest_alternate_game_path};
 use eso_addons_core::service::result::{
     AddonDepOption, AddonShowDetails, GitAddonResult, LocalAddonResult, ManifestAddonDetails,
     UpdateResult,
@@ -31,7 +31,7 @@ use views::search::Search;
 use views::settings::Settings;
 use views::ui_helpers::{
     AddonResponse, AddonResponseType, InstalledAddonRow, InstalledAddonSource, PromisedValue,
-    ViewOpt,
+    ViewOpt, truncate_path_display,
 };
 use views::{ResetView, View};
 
@@ -41,45 +41,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Detect a human-readable label for an addon folder based on its path.
 /// Heuristics: case-insensitive "live" → "Live", "pts" → "PTS", basename fallback.
-fn detect_folder_label(path: &std::path::Path) -> String {
-    let path_str = path.to_string_lossy().to_string();
-    let lower = path_str.to_lowercase();
-
-    if lower.contains("pts") {
-        return "PTS".to_string();
-    }
-    if lower.contains("live") {
-        return "Live".to_string();
-    }
-
-    // Fallback to directory basename, or "Custom"
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| {
-            // Capitalize first letter
-            let mut c = n.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().chain(c).collect(),
-            }
-        })
-        .unwrap_or_else(|| "Custom".to_string())
-}
-
-/// Truncate a path string for display, keeping start and end visible.
-fn truncate_path_display(path: &str) -> String {
-    const MAX_LEN: usize = 60;
-    if path.len() <= MAX_LEN {
-        return path.to_string();
-    }
-    let start_len = 15;
-    let mid_len = 9; // "///...///"
-    let end_len = MAX_LEN - start_len - mid_len; // 36
-    let start = &path[..start_len];
-    let end = &path[path.len() - end_len..];
-    format!("{start}///...///{end}")
-}
-
 #[tokio::main]
 async fn main() -> Result<(), eframe::Error> {
     dotenv().ok();
@@ -1129,118 +1090,5 @@ impl eframe::App for EamApp {
                 AddonResponseType::None => {}
             }
         });
-    }
-}
-
-#[cfg(test)]
-mod path_heuristic_tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn test_detect_folder_label_live() {
-        assert_eq!(
-            detect_folder_label(Path::new(
-                "/home/user/My Games/The Elder Scrolls Online/live/AddOns"
-            )),
-            "Live"
-        );
-        // Case insensitive
-        assert_eq!(
-            detect_folder_label(Path::new("/games/ESO/LIVE/AddOns")),
-            "Live"
-        );
-        // Windows-style
-        assert_eq!(
-            detect_folder_label(Path::new("C:\\Users\\eso\\My Games\\ESO\\live\\AddOns")),
-            "Live"
-        );
-    }
-
-    #[test]
-    fn test_detect_folder_label_pts() {
-        assert_eq!(
-            detect_folder_label(Path::new(
-                "/home/user/My Games/The Elder Scrolls Online/pts/AddOns"
-            )),
-            "PTS"
-        );
-        // PTS takes precedence over Live
-        assert_eq!(
-            detect_folder_label(Path::new("/games/ESO/live-pts-mixed/AddOns")),
-            "PTS"
-        );
-        // Case insensitive
-        assert_eq!(
-            detect_folder_label(Path::new("/games/ESO/PTS/AddOns")),
-            "PTS"
-        );
-    }
-
-    #[test]
-    fn test_detect_folder_label_basename_fallback() {
-        assert_eq!(
-            detect_folder_label(Path::new("/games/eso/custom_folder")),
-            "Custom_folder"
-        );
-        assert_eq!(
-            detect_folder_label(Path::new("/path/to/my_addons")),
-            "My_addons"
-        );
-    }
-
-    #[test]
-    fn test_detect_folder_label_custom_fallback() {
-        // Path with no file_name component
-        assert_eq!(detect_folder_label(Path::new("/")), "Custom");
-    }
-
-    #[test]
-    fn test_suggest_pts_path_live_to_pts() {
-        let live = Path::new("/home/user/My Games/The Elder Scrolls Online/live/AddOns");
-        let suggested = suggest_alternate_game_path(live);
-        assert_eq!(
-            suggested,
-            Some("/home/user/My Games/The Elder Scrolls Online/pts/AddOns".to_string())
-        );
-    }
-
-    #[test]
-    fn test_suggest_pts_path_pts_to_live() {
-        let pts = Path::new("/home/user/My Games/The Elder Scrolls Online/pts/AddOns");
-        let suggested = suggest_alternate_game_path(pts);
-        assert_eq!(
-            suggested,
-            Some("/home/user/My Games/The Elder Scrolls Online/live/AddOns".to_string())
-        );
-    }
-
-    #[test]
-    fn test_suggest_pts_path_case_insensitive() {
-        let live = Path::new("/games/ESO/LIVE/AddOns");
-        let suggested = suggest_alternate_game_path(live);
-        assert!(suggested.is_some());
-        assert!(suggested.unwrap().to_lowercase().contains("pts"));
-    }
-
-    #[test]
-    fn test_suggest_pts_path_no_match() {
-        let custom = Path::new("/games/ESO/unknown/AddOns");
-        assert!(suggest_alternate_game_path(custom).is_none());
-    }
-
-    #[test]
-    fn test_truncate_path_display_short() {
-        let short = "/short/path";
-        assert_eq!(truncate_path_display(short), short);
-    }
-
-    #[test]
-    fn test_truncate_path_display_long() {
-        let long = "/home/user/My Games/The Elder Scrolls Online/live/AddOns/very/deep/path";
-        let truncated = truncate_path_display(long);
-        assert!(truncated.len() <= 60);
-        assert!(truncated.starts_with("/home/user/My "));
-        assert!(truncated.ends_with("ery/deep/path"));
     }
 }

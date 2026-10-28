@@ -143,6 +143,20 @@ pub fn truncate_len(text: &String, length: usize) -> String {
     text.to_string()
 }
 
+/// Truncate a path string for display, keeping start and end visible.
+pub fn truncate_path_display(path: &str) -> String {
+    const MAX_LEN: usize = 60;
+    if path.len() <= MAX_LEN {
+        return path.to_string();
+    }
+    let start_len = 15;
+    let mid_len = 9; // "///...///"
+    let end_len = MAX_LEN - start_len - mid_len; // 36
+    let start = &path[..start_len];
+    let end = &path[path.len() - end_len..];
+    format!("{start}///...///{end}")
+}
+
 use egui_extras::{Column, TableBuilder};
 
 #[derive(PartialEq, Default)]
@@ -930,5 +944,25 @@ impl<'a> InstalledAddonTable<'a> {
         });
 
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_path_display_short() {
+        let short = "/short/path";
+        assert_eq!(truncate_path_display(short), short);
+    }
+
+    #[test]
+    fn test_truncate_path_display_long() {
+        let long = "/home/user/My Games/The Elder Scrolls Online/live/AddOns/very/deep/path";
+        let truncated = truncate_path_display(long);
+        assert!(truncated.len() <= 60);
+        assert!(truncated.starts_with("/home/user/My "));
+        assert!(truncated.ends_with("ery/deep/path"));
     }
 }
